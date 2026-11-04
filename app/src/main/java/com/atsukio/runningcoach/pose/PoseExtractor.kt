@@ -55,7 +55,7 @@ private fun captureFps(playbackFps: Float, slowMotionFps: Float?) =
  * Runs MediaPipe pose detection on every frame of a video, entirely on the device. Frames are decoded
  * on one thread while the previous frames are being detected on another.
  */
-class PoseExtractor(private val context: Context) {
+class PoseExtractor(private val context: Context, private val useGpu: Boolean = true) {
 
     suspend fun extract(
         video: File,
@@ -121,7 +121,7 @@ class PoseExtractor(private val context: Context) {
                     // Each MediaPipe instance stays on its own thread.
                     Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { thread ->
                         withContext(thread) {
-                            Landmarker(context, preferGpu = i == 0).use { landmarker ->
+                            Landmarker(context, preferGpu = useGpu && i == 0).use { landmarker ->
                                 var count = 0
                                 for (item in decoded) {
                                     val pose = landmarker.detect(item.frame.bitmap)

@@ -2,6 +2,7 @@ package com.atsukio.runningcoach.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -14,6 +15,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -22,12 +24,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.atsukio.runningcoach.R
+import com.atsukio.runningcoach.data.CoachSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -39,6 +43,8 @@ fun AboutScreen(onBack: () -> Unit) {
     val version = remember {
         runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull()
     }
+    val settings = remember { CoachSettings(context) }
+    var useGpu by remember { mutableStateOf(settings.useGpu) }
     var licences by remember { mutableStateOf("") }
     LaunchedEffect(Unit) {
         licences = withContext(Dispatchers.IO) {
@@ -73,6 +79,21 @@ fun AboutScreen(onBack: () -> Unit) {
                     "Source code and privacy policy: github.com/Atsukio/stride-lab",
                 style = MaterialTheme.typography.bodySmall,
             )
+            HorizontalDivider()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Use the GPU for pose detection", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Faster. Turn off if the skeleton doesn't line up with the runner; " +
+                            "some phones' graphics drivers give less accurate results.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Switch(checked = useGpu, onCheckedChange = {
+                    useGpu = it
+                    settings.useGpu = it
+                })
+            }
             HorizontalDivider()
             Text("Open-source licences", style = MaterialTheme.typography.titleMedium)
             Text(licences, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)

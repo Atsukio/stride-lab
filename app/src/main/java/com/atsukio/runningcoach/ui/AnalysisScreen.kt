@@ -60,7 +60,7 @@ class AnalysisViewModel(app: Application, handle: SavedStateHandle) : AndroidVie
         try {
             var info: VideoInfo? = null
             var lastPercent = -1
-            val track = PoseExtractor(getApplication()).extract(
+            val track = PoseExtractor(getApplication(), useGpu = CoachSettings(getApplication()).useGpu).extract(
                 repo.videoFile(sessionId),
                 onInfo = { info = it },
             ) { progress ->
