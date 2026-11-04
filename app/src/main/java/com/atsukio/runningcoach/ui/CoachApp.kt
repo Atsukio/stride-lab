@@ -16,6 +16,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.atsukio.runningcoach.data.CoachSettings
 import com.atsukio.runningcoach.data.RunRecorder
 
 @Composable
@@ -38,7 +39,16 @@ fun CoachApp() {
     val nav = rememberNavController()
     val context = LocalContext.current
     val runRecorder = remember { RunRecorder.get(context) }
-    NavHost(navController = nav, startDestination = "home") {
+    val settings = remember { CoachSettings(context) }
+    // First launch opens the setup guide; after that it's a tap away on the home screen.
+    NavHost(navController = nav, startDestination = if (settings.guideSeen) "home" else "guide") {
+        composable("guide") {
+            GuideScreen(onDone = {
+                settings.guideSeen = true
+                if (!nav.popBackStack()) nav.navigate("home") { popUpTo("guide") { inclusive = true } }
+            })
+        }
+        composable("trends") { TrendsScreen(onBack = { nav.popBackStack() }) }
         composable("home") {
             HomeScreen(
                 onNewAnalysis = { nav.navigate("capture") },
@@ -49,6 +59,8 @@ fun CoachApp() {
                 onOpenRunSummary = { id -> nav.navigate("runsummary/$id") },
                 onOpenSession = { id -> nav.navigate("result/$id") },
                 onOpenAbout = { nav.navigate("about") },
+                onOpenTrends = { nav.navigate("trends") },
+                onOpenGuide = { nav.navigate("guide") },
             )
         }
         composable("run") {

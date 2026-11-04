@@ -79,6 +79,8 @@ fun HomeScreen(
     onOpenRunSummary: (String) -> Unit,
     onOpenSession: (String) -> Unit,
     onOpenAbout: () -> Unit,
+    onOpenTrends: () -> Unit,
+    onOpenGuide: () -> Unit,
 ) {
     val context = LocalContext.current
     val repo = remember { SessionRepository(context) }
@@ -138,7 +140,9 @@ fun HomeScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 item { WholeRunCard(inProgress = activeRun != null, onClick = onStartRun) }
-                if (list.isEmpty()) item { FilmingTips() }
+                val analysed = list.filterIsInstance<HomeItem.Clip>().map { it.session }.filter { it.metrics != null }
+                if (analysed.size >= 2) item { TrendsCard(analysed, onClick = onOpenTrends) }
+                if (list.isEmpty()) item { FilmingTips(onOpenGuide = onOpenGuide) }
                 items(list, key = { if (it is HomeItem.Run) "run-${it.run.id}" else (it as HomeItem.Clip).session.id }) { item ->
                     when (item) {
                         is HomeItem.Clip -> SessionCard(item.session, onClick = { onOpenSession(item.session.id) })
@@ -154,8 +158,30 @@ fun HomeScreen(
     }
 }
 
+/** A one-line progress summary that opens the trends screen. */
 @Composable
-fun FilmingTips(modifier: Modifier = Modifier) {
+private fun TrendsCard(analysed: List<Session>, onClick: () -> Unit) {
+    val byDate = analysed.sortedBy { it.createdAt }
+    val first = byDate.first().metrics?.cadenceSpm
+    val last = byDate.last().metrics?.cadenceSpm
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Your progress", style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (first != null && last != null) {
+                    "Cadence ${first.roundToInt()} → ${last.roundToInt()} steps/min over ${analysed.size} clips. " +
+                        "See every measurement over time."
+                } else {
+                    "See how each measurement has changed over ${analysed.size} clips."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
+}
+
+@Composable
+fun FilmingTips(modifier: Modifier = Modifier, onOpenGuide: (() -> Unit)? = null) {
     Card(modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("How to film", style = MaterialTheme.typography.titleMedium)
@@ -164,6 +190,7 @@ fun FilmingTips(modifier: Modifier = Modifier) {
             Text("3. Keep the whole body, head to feet, in frame.")
             Text("4. Record 10–15 seconds of steady running.")
             Text("Tip: a Bluetooth camera remote can start and stop recording.")
+            onOpenGuide?.let { TextButton(onClick = it) { Text("Open the setup guide") } }
             Text(
                 "Videos and results stay on this phone. Nothing is uploaded.",
                 style = MaterialTheme.typography.bodySmall,

@@ -26,7 +26,19 @@ Everything runs on the phone: there is no internet permission, no cloud service,
    Without a speed, the runner's height from Settings is used instead.
 4. **Coaching** (`analysis/Coach.kt`) turns the numbers into comments, cues and drills using fixed rules.
    Some thresholds adjust to the treadmill speed if you enter it. Results are compared with the previous session.
-5. **Replay** the clip at 1×, ½× or ¼× speed with the detected skeleton drawn on top. Each foot landing is ringed.
+5. **Replay** the clip at 1×, ½× or ¼× speed, or frame by frame, with the detected skeleton drawn on top
+   (cleaned, or **Raw** to see exactly what the detector found). Each foot landing is ringed.
+6. **See what the numbers mean.** Each measurement has a bar showing it against its good range, and an
+   **At landing** card shows every foot landing with the overstride, shin angle, knee bend and lean drawn on it.
+   **Analyse again** reruns a clip with the current version and settings.
+
+## Recording and practice
+
+- **Setup guide** on first launch (and from the home screen): where to put the phone and why.
+- **Framing check:** before recording, the camera screen draws your skeleton live and says what to fix
+  (head or feet cut off, facing the camera, too small, off-centre, too dark).
+- **Metronome** at a chosen step rate, on the camera and run screens; the cadence card can set it to your target.
+- **Progress:** every measurement charted across your clips against its good range.
 
 ## Watch and sensors
 
@@ -65,9 +77,11 @@ Requires JDK 21 and the Android SDK (compileSdk 36). Built with Gradle 9.6 and A
 ```sh
 ./gradlew assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
 ./gradlew testDebugUnitTest    # analysis tests on a synthetic runner
+./gradlew assembleRelease      # shrunk release build (sign it before installing)
 ```
 
-The first build downloads the pose model (~9 MB) into `app/src/main/assets/`. It's ignored by git.
+The first build downloads the pose model (~9 MB) into `app/src/main/assets/` and checks its SHA-256, so a changed
+or corrupted file stops the build. It's ignored by git. GitHub Actions tests, lints and builds every push.
 The app itself never connects to the internet.
 
 ## Project layout

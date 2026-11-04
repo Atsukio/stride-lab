@@ -1,18 +1,38 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A stick-figure runner inside the adaptive icon safe zone. -->
+<!--
+  Stride Lab: a runner mid-stride with the app's overstride mark, a line straight down from the hips
+  and across to the landing foot. Everything sits inside the adaptive icon's 66 dp safe zone.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M62,33m-6,0a6,6 0,1 1,12 0a6,6 0,1 1,-12 0" />
+    <!-- Ground. -->
     <path
         android:fillColor="#00000000"
-        android:pathData="M58,43 L52,60 M52,60 L62,69 L58,80 M52,60 L44,68 L36,66 M57,46 L67,53 L73,47 M57,46 L47,50 L43,58"
-        android:strokeWidth="5"
+        android:pathData="M30,79 H80"
+        android:strokeWidth="2.5"
+        android:strokeAlpha="0.55"
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round" />
+    <!-- Head. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M60,30m-5.5,0a5.5,5.5 0,1 1,11 0a5.5,5.5 0,1 1,-11 0" />
+    <!-- Body, arms and legs. -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M58,39 L52,56 M52,56 L64,64 L63,77 M52,56 L42,64 L34,61 M56,43 L66,49 L71,43 M56,43 L47,47 L44,55"
+        android:strokeWidth="4.5"
         android:strokeColor="#FFFFFF"
         android:strokeLineCap="round"
         android:strokeLineJoin="round" />
+    <!-- Overstride mark: dashes down from the hips, then across to the foot. -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M52,61 V64 M52,67 V70 M52,73 V76 M52,79 H63"
+        android:strokeWidth="2.5"
+        android:strokeColor="#8BE9C1"
+        android:strokeLineCap="round" />
 </vector>
