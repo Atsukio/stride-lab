@@ -1,9 +1,7 @@
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.net.URI
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
@@ -26,6 +24,7 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
+    // Also sets the Kotlin JVM target, now that AGP compiles Kotlin itself.
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -39,16 +38,10 @@ android {
     }
 }
 
-kotlin {
-    compilerOptions {
-        jvmTarget.set(JvmTarget.JVM_17)
-    }
-}
-
 // The pose model ships inside the APK; it is fetched once at build time, never by the app.
 val poseModelUrl =
     "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task"
-val downloadPoseModel by tasks.registering {
+val downloadPoseModel = tasks.register("downloadPoseModel") {
     val model = layout.projectDirectory.file("src/main/assets/pose_landmarker_full.task").asFile
     outputs.file(model)
     onlyIf { !model.exists() }

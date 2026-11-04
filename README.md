@@ -49,7 +49,7 @@ Keep the app open with the screen on during a whole run; it doesn't record in th
 
 ## Building
 
-Requires JDK 21 and the Android SDK (compileSdk 36). Gradle runs on JDK 21 whichever JDK starts it
+Requires JDK 21 and the Android SDK (compileSdk 36). Built with Gradle 9.6 and Android Gradle Plugin 9.4. Gradle runs on JDK 21 whichever JDK starts it
 (see `gradle/gradle-daemon-jvm.properties`), so Android Studio's bundled JDK is fine. App code targets Java 17.
 
 ```sh
