@@ -13,6 +13,18 @@ data class Feedback(
     val message: String,
     val cue: String? = null,
     val drill: String? = null,
+    /** Where the measurement sits against the good range, for drawing as a bar. */
+    val scale: Scale? = null,
+)
+
+/** A measured [value] on a bar from [min] to [max], where [goodLow]..[goodHigh] is the good range. */
+data class Scale(
+    val value: Double,
+    val min: Double,
+    val max: Double,
+    val goodLow: Double,
+    val goodHigh: Double,
+    val unit: String,
 )
 
 /**
@@ -25,27 +37,54 @@ object Coach {
 
     fun review(metrics: GaitMetrics, speedKmh: Double?, previous: GaitMetrics? = null): List<Feedback> =
         listOfNotNull(
-            metrics.cadenceSpm?.let { cadence(it, speedKmh, previous?.cadenceSpm) },
-            overstride(metrics, speedKmh, previous?.overstrideCm),
-            metrics.shinAngleDeg?.let { shinAngle(it) },
-            metrics.trunkLeanDeg?.let { trunkLean(it) },
-            metrics.verticalOscillationCm?.let { bounce(it, previous?.verticalOscillationCm) },
-            knees(metrics),
-            metrics.elbowAngleDeg?.let { arms(it) },
-            metrics.overstrideAsymmetryCm?.let { legBalance(it) },
+            metrics.cadenceSpm?.let {
+                cadence(it, speedKmh, previous?.cadenceSpm)
+                    .copy(scale = Scale(it, 130.0, 200.0, cadenceFloor(speedKmh), 200.0, "steps/min"))
+            },
+            overstride(metrics, speedKmh, previous?.overstrideCm)?.let { feedback ->
+                // The rule works on overstride as a share of leg length; the bar shows the same limit in cm.
+                val cm = metrics.overstrideCm!!
+                val legCm = metrics.overstrideLegRatio?.takeIf { abs(it) > 1e-6 }?.let { cm / it }
+                val goodCm = legCm?.let { it * overstrideLimit(speedKmh) }
+                if (goodCm == null) feedback else feedback.copy(scale = Scale(cm, -5.0, goodCm * 2.5, -5.0, goodCm, "cm"))
+            },
+            metrics.shinAngleDeg?.let { shinAngle(it).copy(scale = Scale(it, -5.0, 20.0, -5.0, 6.0, "°")) },
+            metrics.trunkLeanDeg?.let { trunkLean(it).copy(scale = Scale(it, -5.0, 20.0, 2.0, 12.0, "°")) },
+            metrics.verticalOscillationCm?.let {
+                bounce(it, previous?.verticalOscillationCm).copy(scale = Scale(it, 0.0, 16.0, 0.0, 8.0, "cm"))
+            },
+            knees(metrics)?.let { feedback ->
+                val atContact = metrics.kneeFlexionAtContactDeg
+                val peak = metrics.peakStanceKneeFlexionDeg
+                // Show the number the verdict is about: the bend at landing, or the deepest bend.
+                val scale = when {
+                    atContact != null && (atContact < 10 || peak == null) -> Scale(atContact, 0.0, 40.0, 10.0, 40.0, "° at landing")
+                    peak != null -> Scale(peak, 0.0, 70.0, 30.0, 55.0, "° max")
+                    else -> null
+                }
+                feedback.copy(scale = scale)
+            },
+            metrics.elbowAngleDeg?.let { arms(it).copy(scale = Scale(it, 40.0, 160.0, 60.0, 110.0, "°")) },
+            metrics.overstrideAsymmetryCm?.let { legBalance(it).copy(scale = Scale(it, 0.0, 20.0, 0.0, 8.0, "cm")) },
         ).sortedBy { it.status.ordinal }
 
     /** The first thing to work on, or null if nothing needs changing. */
     fun mainFocus(feedback: List<Feedback>): Feedback? = feedback.firstOrNull { it.status == FeedbackStatus.IMPROVE }
 
+    /** Lowest good cadence; faster running needs a quicker step rate. */
+    private fun cadenceFloor(speedKmh: Double?) = when {
+        speedKmh == null -> 160.0
+        speedKmh < 9 -> 152.0
+        speedKmh < 12 -> 158.0
+        speedKmh < 15 -> 165.0
+        else -> 172.0
+    }
+
+    /** Overstride limit as a share of leg length; faster running naturally lands the foot a little further forward. */
+    private fun overstrideLimit(speedKmh: Double?) = 0.18 + if (speedKmh != null && speedKmh > 13) 0.04 else 0.0
+
     private fun cadence(spm: Double, speedKmh: Double?, previous: Double?): Feedback {
-        val floor = when {
-            speedKmh == null -> 160.0
-            speedKmh < 9 -> 152.0
-            speedKmh < 12 -> 158.0
-            speedKmh < 15 -> 165.0
-            else -> 172.0
-        }
+        val floor = cadenceFloor(speedKmh)
         val value = "${spm.roundToInt()} steps/min"
         val history = since(previous, "steps/min")
         if (spm >= floor) {
@@ -65,9 +104,7 @@ object Coach {
     private fun overstride(m: GaitMetrics, speedKmh: Double?, previous: Double?): Feedback? {
         val cm = m.overstrideCm ?: return null
         val ratio = m.overstrideLegRatio ?: return null
-        // Faster running naturally lands the foot a little further forward.
-        val allowance = if (speedKmh != null && speedKmh > 13) 0.04 else 0.0
-        val good = 0.18 + allowance
+        val good = overstrideLimit(speedKmh)
         val value = if (cm <= 0) "Under hips" else "${cm.roundToInt()} cm ahead of hips"
         val history = since(previous, "cm")
         return when {

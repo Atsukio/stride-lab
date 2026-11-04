@@ -189,6 +189,17 @@ private fun ResultContent(data: ResultData, video: File, padding: PaddingValues)
             )
         }
         item { Summary(session, feedback) }
+        if (metrics != null && data.pose != null && metrics.contactFrames.isNotEmpty()) {
+            item {
+                LandingCard(
+                    video = video,
+                    track = data.pose,
+                    metrics = metrics,
+                    aspectRatio = session.videoWidth.toFloat() / session.videoHeight.coerceAtLeast(1),
+                    playbackFps = session.playbackFps,
+                )
+            }
+        }
         metrics?.estimatedHeightCm?.let { item { HeightCard(it, fromWatch = session.speedFromSensor) } }
         items(feedback) { FeedbackCard(it) }
         if (session.warnings.isNotEmpty()) {
@@ -316,6 +327,7 @@ private fun FeedbackCard(item: Feedback) {
             Text(item.message, style = MaterialTheme.typography.bodyMedium)
             item.cue?.let { Text("Cue: \"$it\"", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold) }
             item.drill?.let { Text("Drill: $it", style = MaterialTheme.typography.bodyMedium) }
+            item.scale?.let { RangeBar(it, markerColor = tint, goodColor = GoodColor) }
         }
     }
 }
