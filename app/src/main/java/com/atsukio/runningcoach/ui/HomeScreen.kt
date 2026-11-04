@@ -126,6 +126,7 @@ fun FilmingTips(modifier: Modifier = Modifier) {
             Text("2. Put the phone side-on to the runner at hip height, about 2–3 m away.")
             Text("3. Keep the whole body, head to feet, in frame.")
             Text("4. Record 10–15 seconds of steady running.")
+            Text("Tip: a Bluetooth camera remote can start and stop recording.")
             Text(
                 "Videos and results stay on this phone. Nothing is uploaded.",
                 style = MaterialTheme.typography.bodySmall,

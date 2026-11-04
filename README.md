@@ -6,7 +6,8 @@ Everything runs on the phone: there is no internet permission, no cloud service,
 ## How it works
 
 1. **Record** a 15-second side-on clip with a 5-second countdown, or **import** one from the gallery.
-   The app asks for 60 fps where the camera supports it.
+   The app asks for 60 fps where the camera supports it. A Bluetooth camera remote (volume, Enter or
+   play/pause key) starts the countdown, cancels it, or stops recording. No Bluetooth permission is needed.
 2. **Pose detection.** [MediaPipe Pose Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker)
    (full model, bundled in the APK) finds 33 body landmarks in every frame.
 3. **Gait analysis** (`analysis/GaitAnalyzer.kt`) finds each foot landing and measures:

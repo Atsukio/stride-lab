@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.util.Range
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -72,6 +73,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.atsukio.runningcoach.MainActivity
 import com.atsukio.runningcoach.data.SessionRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -228,6 +230,13 @@ fun CaptureScreen(onBack: () -> Unit, onVideoReady: (id: String, speedKmh: Doubl
             }
             CapturePhase.Saving -> Unit
         }
+    }
+
+    val activity = LocalActivity.current as? MainActivity
+    val shutter by rememberUpdatedState<() -> Unit> { onRecordButton() }
+    DisposableEffect(activity) {
+        activity?.onShutterKey = { shutter() }
+        onDispose { activity?.onShutterKey = null }
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
