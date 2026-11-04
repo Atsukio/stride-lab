@@ -5,7 +5,7 @@ Everything runs on the phone: there is no internet permission, no cloud service,
 
 ## How it works
 
-1. **Record** a 15-second side-on clip with a 5-second countdown, or **import** one from the gallery.
+1. **Record** a side-on clip (10–30 seconds, set in Settings; 15 by default) after a 5-second countdown, or **import** one from the gallery.
    The app asks for 60 fps where the camera supports it. A Bluetooth camera remote (volume, Enter or
    play/pause key) starts the countdown, cancels it, or stops recording. No Bluetooth permission is needed.
 2. **Pose detection.** [MediaPipe Pose Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker)
@@ -13,6 +13,11 @@ Everything runs on the phone: there is no internet permission, no cloud service,
    hardware decoder while earlier frames are still being analysed; files it can't handle fall back to a slower path.
    Each frame is detected on its own, then the whole track is cleaned: swapped legs are put back, one-off jumps
    removed and jitter smoothed without lagging behind fast feet (`analysis/PoseCleaner.kt`).
+   **Analyse while recording** (on by default, in Settings) runs pose detection on a second camera stream during
+   the clip, so results are ready almost as soon as it ends. Tiny thumbnails of every camera frame are matched to the
+   saved video to line the poses up frame for frame (`pose/LiveAlignment.kt`). If live analysis can't keep up, the
+   recording drops below 60 fps or the phone gets hot, the clip is analysed after recording and the app offers to
+   turn the setting off.
 3. **Gait analysis** (`analysis/GaitAnalyzer.kt`) finds each foot landing and measures:
    cadence, overstride (ankle ahead of hips at landing), shin angle at landing, knee bend at landing and during stance,
    vertical bounce, trunk lean, elbow angle, and the left/right difference in landing distance.

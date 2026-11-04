@@ -16,9 +16,23 @@ class CoachSettings(context: Context) {
         get() = prefs.getBoolean(KEY_GPU, true)
         set(value) = prefs.edit { putBoolean(KEY_GPU, value) }
 
-    private companion object {
-        const val KEY_GPU = "use_gpu"
-        const val KEY_HEIGHT = "runner_height_cm"
-        const val DEFAULT_HEIGHT_CM = 175f
+    /** Find poses while recording, so results are ready almost as soon as the clip ends. */
+    var liveAnalysis: Boolean
+        get() = prefs.getBoolean(KEY_LIVE, true)
+        set(value) = prefs.edit { putBoolean(KEY_LIVE, value) }
+
+    /** How long each clip records for, in seconds. */
+    var recordSeconds: Int
+        get() = prefs.getInt(KEY_RECORD_SECONDS, DEFAULT_RECORD_SECONDS).takeIf { it in RECORD_OPTIONS } ?: DEFAULT_RECORD_SECONDS
+        set(value) = prefs.edit { putInt(KEY_RECORD_SECONDS, value) }
+
+    companion object {
+        val RECORD_OPTIONS = listOf(10, 15, 20, 30)
+        private const val DEFAULT_RECORD_SECONDS = 15
+        private const val KEY_LIVE = "live_analysis"
+        private const val KEY_RECORD_SECONDS = "record_seconds"
+        private const val KEY_GPU = "use_gpu"
+        private const val KEY_HEIGHT = "runner_height_cm"
+        private const val DEFAULT_HEIGHT_CM = 175f
     }
 }

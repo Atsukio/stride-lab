@@ -4,12 +4,17 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.util.Range
+import android.util.Size
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.FileOutputOptions
@@ -48,6 +53,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -75,8 +81,11 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.atsukio.runningcoach.MainActivity
 import com.atsukio.runningcoach.data.CaptureInfo
+import com.atsukio.runningcoach.data.CoachSettings
 import com.atsukio.runningcoach.data.RunRecorder
 import com.atsukio.runningcoach.data.SessionRepository
+import com.atsukio.runningcoach.pose.LivePoseAnalyzer
+import com.atsukio.runningcoach.pose.LiveResults
 import com.atsukio.runningcoach.sensors.SensorSample
 import com.atsukio.runningcoach.sensors.SensorSummary
 import kotlinx.coroutines.Dispatchers
@@ -85,10 +94,10 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.Executors
 import kotlin.coroutines.suspendCoroutine
 
 private const val COUNTDOWN_SECONDS = 5
-private const val MAX_RECORDING_SECONDS = 15
 
 private sealed interface CapturePhase {
     data object Idle : CapturePhase
@@ -117,6 +126,11 @@ fun CaptureScreen(
     val runRecorder = remember { RunRecorder.get(context) }
     val scope = rememberCoroutineScope()
     val currentOnVideoReady by rememberUpdatedState(onVideoReady)
+    val settings = remember { CoachSettings(context) }
+    val maxSeconds = remember { settings.recordSeconds }
+    var liveOn by remember { mutableStateOf(settings.liveAnalysis) }
+    var liveAnalyzer by remember { mutableStateOf<LivePoseAnalyzer?>(null) }
+    var liveUnavailable by remember { mutableStateOf(false) }
 
     var hasPermission by remember { mutableStateOf(hasCameraPermission(context)) }
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -162,7 +176,7 @@ fun CaptureScreen(
         PreviewView(context).apply { scaleType = PreviewView.ScaleType.FIT_CENTER }
     }
 
-    LaunchedEffect(lensFacing, hasPermission) {
+    LaunchedEffect(lensFacing, hasPermission, liveOn) {
         if (!hasPermission) return@LaunchedEffect
         val provider = cameraProvider(context)
         val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
@@ -170,23 +184,51 @@ fun CaptureScreen(
         fun recorder() = Recorder.Builder()
             .setQualitySelector(QualitySelector.from(Quality.FHD, FallbackStrategy.lowerQualityOrHigherThan(Quality.FHD)))
             .build()
+        val analysisExecutor = Executors.newSingleThreadExecutor()
+        var analyzer: LivePoseAnalyzer? = null
+        // 60 fps catches the moment of landing much better, so it comes before live analysis.
+        val attempts = listOfNotNull(
+            if (liveOn) (true to true) else null,
+            false to true,
+            if (liveOn) (true to false) else null,
+            false to false,
+        )
         try {
-            provider.unbindAll()
-            // 60 fps catches the moment of landing much better; fall back to the default rate if unsupported.
-            videoCapture = try {
-                VideoCapture.Builder(recorder()).setTargetFrameRate(Range(60, 60)).build()
-                    .also { provider.bindToLifecycle(lifecycleOwner, selector, preview, it) }
-            } catch (e: Exception) {
-                provider.unbindAll()
-                VideoCapture.withOutput(recorder())
-                    .also { provider.bindToLifecycle(lifecycleOwner, selector, preview, it) }
+            for ((withLive, at60) in attempts) {
+                try {
+                    provider.unbindAll()
+                    val capture = if (at60) {
+                        VideoCapture.Builder(recorder()).setTargetFrameRate(Range(60, 60)).build()
+                    } else {
+                        VideoCapture.withOutput(recorder())
+                    }
+                    if (withLive) {
+                        val analysis = liveAnalysisUseCase()
+                        val camera = provider.bindToLifecycle(lifecycleOwner, selector, preview, capture, analysis)
+                        val camera60Fps = camera.cameraInfo.supportedFrameRateRanges.any { it.upper >= 60 }
+                        analyzer = LivePoseAnalyzer(context, settings.useGpu, camera60Fps)
+                            .also { analysis.setAnalyzer(analysisExecutor, it) }
+                    } else {
+                        provider.bindToLifecycle(lifecycleOwner, selector, preview, capture)
+                    }
+                    liveAnalyzer = analyzer
+                    liveUnavailable = liveOn && !withLive
+                    videoCapture = capture
+                    break
+                } catch (e: IllegalArgumentException) {
+                    continue
+                } catch (e: IllegalStateException) {
+                    continue
+                }
             }
+            if (videoCapture == null) error = "This camera isn't available."
             awaitCancellation()
-        } catch (e: IllegalArgumentException) {
-            error = "This camera isn't available."
         } finally {
             videoCapture = null
+            liveAnalyzer = null
             provider.unbindAll()
+            analyzer?.close()
+            analysisExecutor.shutdown()
         }
     }
 
@@ -211,11 +253,14 @@ fun CaptureScreen(
             val run = runRecorder.active.value?.takeIf { it.id == runId }
             val samples = mutableListOf<SensorSample>()
             val startedAt = System.currentTimeMillis()
+            val live = liveAnalyzer
+            live?.begin()
             recording = capture.output
                 .prepareRecording(context, FileOutputOptions.Builder(file).build())
                 .start(ContextCompat.getMainExecutor(context)) { event ->
                     if (event !is VideoRecordEvent.Finalize) return@start
                     recording = null
+                    val liveResult = live?.end()
                     if (event.hasError() && event.error != VideoRecordEvent.Finalize.ERROR_DURATION_LIMIT_REACHED) {
                         repo.delete(id)
                         phase = CapturePhase.Idle
@@ -230,6 +275,7 @@ fun CaptureScreen(
                             runOffsetSec = run?.let { (startedAt - it.startedAt) / 1000.0 },
                         )
                         repo.saveCaptureInfo(id, info)
+                        liveResult?.let { LiveResults.put(id, it) }
                         currentOnVideoReady(id)
                     }
                 }
@@ -237,7 +283,7 @@ fun CaptureScreen(
             while (true) {
                 val elapsedMs = System.currentTimeMillis() - startedAt
                 val seconds = (elapsedMs / 1000).toInt()
-                if (seconds >= MAX_RECORDING_SECONDS) break
+                if (seconds >= maxSeconds) break
                 phase = CapturePhase.Recording(seconds)
                 if (elapsedMs >= nextSampleMs) {
                     hub.freshStats()?.let { samples += it.toSample(elapsedMs / 1000.0) }
@@ -313,7 +359,7 @@ fun CaptureScreen(
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 when (val p = phase) {
                     is CapturePhase.Recording -> OverlayLabel(
-                        "● 0:%02d / 0:%02d".format(p.seconds, MAX_RECORDING_SECONDS),
+                        "● 0:%02d / 0:%02d".format(p.seconds, maxSeconds) + if (liveAnalyzer != null) " · analysing" else "",
                         color = Color(0xFFFF5252),
                     )
                     CapturePhase.Idle -> OverlayLabel("Side-on · whole body in frame · hip height")
@@ -353,6 +399,20 @@ fun CaptureScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 error?.let { Text(it, color = Color(0xFFFF8A80)) }
+                if (liveUnavailable && phase == CapturePhase.Idle) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "This camera can't analyse while recording, so clips are analysed afterwards.",
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = {
+                            settings.liveAnalysis = false
+                            liveOn = false
+                        }) { Text("Turn off") }
+                    }
+                }
                 if (phase == CapturePhase.Idle) {
                     OutlinedTextField(
                         value = speedText,
@@ -443,6 +503,23 @@ private fun overlayIconColors() = IconButtonDefaults.iconButtonColors(
     containerColor = Color.Black.copy(alpha = 0.4f),
     contentColor = Color.White,
 )
+
+/**
+ * A 720p, 16:9 stream for live pose detection. The same aspect ratio as the video keeps the framing identical,
+ * so live poses line up with the recording. Frames are dropped, never queued, when analysis falls behind.
+ */
+private fun liveAnalysisUseCase() = ImageAnalysis.Builder()
+    .setResolutionSelector(
+        ResolutionSelector.Builder()
+            .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+            .setResolutionStrategy(
+                ResolutionStrategy(Size(1280, 720), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER),
+            )
+            .build(),
+    )
+    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+    .build()
 
 private suspend fun cameraProvider(context: Context): ProcessCameraProvider = suspendCoroutine { cont ->
     val future = ProcessCameraProvider.getInstance(context)

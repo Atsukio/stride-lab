@@ -3,11 +3,14 @@ package com.atsukio.runningcoach.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -18,17 +21,20 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -143,14 +149,7 @@ fun HomeScreen(
     }
 
     if (showSettings) {
-        HeightDialog(
-            initialCm = settings.runnerHeightCm,
-            onDismiss = { showSettings = false },
-            onSave = {
-                settings.runnerHeightCm = it
-                showSettings = false
-            },
-        )
+        SettingsDialog(settings, onDismiss = { showSettings = false })
     }
 }
 
@@ -243,34 +242,81 @@ private fun SessionCard(session: Session, onClick: () -> Unit) {
 }
 
 @Composable
-private fun HeightDialog(initialCm: Double, onDismiss: () -> Unit, onSave: (Double) -> Unit) {
-    var text by remember { mutableStateOf(initialCm.roundToInt().toString()) }
+private fun SettingsDialog(settings: CoachSettings, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf(settings.runnerHeightCm.roundToInt().toString()) }
+    var seconds by remember { mutableIntStateOf(settings.recordSeconds) }
+    var live by remember { mutableStateOf(settings.liveAnalysis) }
+    var gpu by remember { mutableStateOf(settings.useGpu) }
     val value = text.toDoubleOrNull()
     val valid = value != null && value in 100.0..230.0
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Runner's height") },
+        title = { Text("Settings") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "Used to convert what the camera sees into centimetres when there's no treadmill speed. " +
-                        "Enter a treadmill speed when recording and the app measures your height for you.",
-                )
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it.filter(Char::isDigit).take(3) },
-                    label = { Text("Height (cm)") },
+                    label = { Text("Runner's height (cm)") },
+                    supportingText = {
+                        Text(
+                            "Turns what the camera sees into centimetres when there's no treadmill speed. " +
+                                "Enter a speed when recording and the app measures your height for you.",
+                        )
+                    },
                     singleLine = true,
                     isError = !valid,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 )
+                Text("Clip length", style = MaterialTheme.typography.titleSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    CoachSettings.RECORD_OPTIONS.forEach { option ->
+                        FilterChip(selected = seconds == option, onClick = { seconds = option }, label = { Text("$option s") })
+                    }
+                }
+                SettingSwitch(
+                    title = "Analyse while recording",
+                    detail = "Results are ready almost as soon as the clip ends. Uses more battery and can warm the phone.",
+                    checked = live,
+                    onChange = { live = it },
+                )
+                SettingSwitch(
+                    title = "Use the GPU for pose detection",
+                    detail = "Faster. Turn off if the skeleton doesn't line up with the runner; " +
+                        "some phones' graphics drivers give less accurate results.",
+                    checked = gpu,
+                    onChange = { gpu = it },
+                )
             }
         },
         confirmButton = {
-            TextButton(onClick = { value?.let(onSave) }, enabled = valid) { Text("Save") }
+            TextButton(
+                onClick = {
+                    value?.let { settings.runnerHeightCm = it }
+                    settings.recordSeconds = seconds
+                    settings.liveAnalysis = live
+                    settings.useGpu = gpu
+                    onDismiss()
+                },
+                enabled = valid,
+            ) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+@Composable
+private fun SettingSwitch(title: String, detail: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
 }
 
 fun formatSpeed(kmh: Double): String =

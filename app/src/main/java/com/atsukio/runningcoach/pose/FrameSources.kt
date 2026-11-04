@@ -35,6 +35,8 @@ internal class CodecFrameSource(
     private val video: File,
     private val rotation: Int,
     private val maxSide: Int,
+    /** Stop after this many frames. */
+    private val limit: Int = Int.MAX_VALUE,
 ) : FrameSource {
     override val name = "codec"
 
@@ -61,6 +63,7 @@ internal class CodecFrameSource(
             val info = MediaCodec.BufferInfo()
             var inputDone = false
             var idleAfterInput = 0
+            var emitted = 0
             while (true) {
                 currentCoroutineContext().ensureActive()
                 if (!inputDone) {
@@ -87,7 +90,10 @@ internal class CodecFrameSource(
                 val timestampMs = info.presentationTimeUs / 1000
                 val end = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
                 decoder.releaseOutputBuffer(outIndex, false)
-                if (bitmap != null) emit(DecodedFrame(bitmap, timestampMs))
+                if (bitmap != null) {
+                    emit(DecodedFrame(bitmap, timestampMs))
+                    if (++emitted >= limit) break
+                }
                 if (end) break
             }
         } finally {

@@ -7,17 +7,23 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
@@ -31,6 +37,7 @@ import com.atsukio.runningcoach.analysis.GaitResult
 import com.atsukio.runningcoach.data.CoachSettings
 import com.atsukio.runningcoach.data.Session
 import com.atsukio.runningcoach.data.SessionRepository
+import com.atsukio.runningcoach.pose.LiveResults
 import com.atsukio.runningcoach.pose.PoseExtractor
 import com.atsukio.runningcoach.pose.VideoInfo
 import kotlinx.coroutines.CancellationException
@@ -44,7 +51,7 @@ import kotlin.math.roundToInt
 sealed interface AnalysisState {
     data class Running(val progress: Float) : AnalysisState
     data object Measuring : AnalysisState
-    data class Done(val runId: String?) : AnalysisState
+    data class Done(val runId: String?, val liveProblems: List<String> = emptyList()) : AnalysisState
     data class Error(val message: String) : AnalysisState
 }
 
@@ -60,8 +67,9 @@ class AnalysisViewModel(app: Application, handle: SavedStateHandle) : AndroidVie
         try {
             var info: VideoInfo? = null
             var lastPercent = -1
-            val track = PoseExtractor(getApplication(), useGpu = CoachSettings(getApplication()).useGpu).extract(
+            val extraction = PoseExtractor(getApplication(), useGpu = CoachSettings(getApplication()).useGpu).extract(
                 repo.videoFile(sessionId),
+                live = LiveResults.take(sessionId),
                 onInfo = { info = it },
             ) { progress ->
                 val percent = (progress * 100).roundToInt()
@@ -70,6 +78,7 @@ class AnalysisViewModel(app: Application, handle: SavedStateHandle) : AndroidVie
                     _state.value = AnalysisState.Running(progress)
                 }
             }
+            val track = extraction.track
             _state.value = AnalysisState.Measuring
             val heightCm = CoachSettings(getApplication()).runnerHeightCm
             val capture = withContext(Dispatchers.IO) {
@@ -110,7 +119,7 @@ class AnalysisViewModel(app: Application, handle: SavedStateHandle) : AndroidVie
                 )
                 capture
             }
-            _state.value = AnalysisState.Done(capture.runId)
+            _state.value = AnalysisState.Done(capture.runId, extraction.liveProblems)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -137,8 +146,32 @@ fun AnalysisScreen(
     }
     BackHandler(onBack = cancel)
 
-    LaunchedEffect(state) {
-        (state as? AnalysisState.Done)?.let { onFinished(viewModel.sessionId, it.runId) }
+    val context = LocalContext.current
+    val settings = remember { CoachSettings(context) }
+    var askedAboutLive by remember { mutableStateOf(false) }
+    val done = state as? AnalysisState.Done
+    val askAboutLive = done != null && done.liveProblems.isNotEmpty() && settings.liveAnalysis && !askedAboutLive
+    LaunchedEffect(done, askAboutLive) {
+        if (done != null && !askAboutLive) onFinished(viewModel.sessionId, done.runId)
+    }
+    if (askAboutLive) {
+        AlertDialog(
+            onDismissRequest = { askedAboutLive = true },
+            title = { Text("Live analysis is struggling on this phone") },
+            text = {
+                Text(
+                    done!!.liveProblems.joinToString("\n") +
+                        "\n\nTurn it off to analyse clips after recording instead. You can change this in Settings.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    settings.liveAnalysis = false
+                    askedAboutLive = true
+                }) { Text("Turn off") }
+            },
+            dismissButton = { TextButton(onClick = { askedAboutLive = true }) { Text("Keep on") } },
+        )
     }
 
     Scaffold { padding ->
