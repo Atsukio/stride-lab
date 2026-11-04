@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -94,7 +95,7 @@ private val LandingColor = Color(0xFFFFEB3B)
 
 @kotlin.OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ResultScreen(id: String, onBack: () -> Unit) {
+fun ResultScreen(id: String, onBack: () -> Unit, onReanalyse: () -> Unit) {
     val context = LocalContext.current
     val repo = remember { SessionRepository(context) }
     var data by remember { mutableStateOf<ResultData?>(null) }
@@ -123,6 +124,10 @@ fun ResultScreen(id: String, onBack: () -> Unit) {
                 },
                 actions = {
                     if (data != null) {
+                        // Runs the clip again with the current version and settings, keeping its date.
+                        IconButton(onClick = onReanalyse) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Analyse again")
+                        }
                         IconButton(onClick = { confirmDelete = true }) {
                             Icon(Icons.Default.Delete, contentDescription = "Delete session")
                         }

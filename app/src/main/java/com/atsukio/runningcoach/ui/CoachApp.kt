@@ -86,12 +86,22 @@ fun CoachApp() {
             )
         }
         composable(
-            "analyse/{id}",
-            arguments = listOf(navArgument("id") { type = NavType.StringType }),
-        ) {
+            "analyse/{id}?reanalyse={reanalyse}",
+            arguments = listOf(
+                navArgument("id") { type = NavType.StringType },
+                navArgument("reanalyse") {
+                    type = NavType.BoolType
+                    defaultValue = false
+                },
+            ),
+        ) { entry ->
+            val reanalyse = entry.arguments?.getBoolean("reanalyse") ?: false
             AnalysisScreen(
                 onFinished = { id, runId ->
-                    if (runId != null && runRecorder.active.value?.id == runId) {
+                    if (reanalyse) {
+                        // Replace the old results screen with a fresh one.
+                        nav.navigate("result/$id") { popUpTo("result/{id}") { inclusive = true } }
+                    } else if (runId != null && runRecorder.active.value?.id == runId) {
                         // Back to the run screen, ready for the next clip.
                         nav.popBackStack()
                     } else {
@@ -102,9 +112,11 @@ fun CoachApp() {
             )
         }
         composable("result/{id}") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
             ResultScreen(
-                id = entry.arguments?.getString("id").orEmpty(),
+                id = id,
                 onBack = { nav.popBackStack() },
+                onReanalyse = { nav.navigate("analyse/$id?reanalyse=true") },
             )
         }
         composable("about") { AboutScreen(onBack = { nav.popBackStack() }) }

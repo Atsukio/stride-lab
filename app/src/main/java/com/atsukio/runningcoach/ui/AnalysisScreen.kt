@@ -61,6 +61,9 @@ sealed interface AnalysisState {
 
 class AnalysisViewModel(app: Application, handle: SavedStateHandle) : AndroidViewModel(app) {
     val sessionId: String = checkNotNull(handle["id"])
+
+    /** Re-running an existing clip: it keeps its date and isn't deleted if cancelled. */
+    private val reanalyse: Boolean = handle["reanalyse"] ?: false
     private val repo = SessionRepository(app)
     private val _state = MutableStateFlow<AnalysisState>(AnalysisState.Running(0f))
     val state = _state.asStateFlow()
@@ -94,6 +97,7 @@ class AnalysisViewModel(app: Application, handle: SavedStateHandle) : AndroidVie
             val track = extraction.track
             _state.value = AnalysisState.Measuring
             val heightCm = CoachSettings(getApplication()).runnerHeightCm
+            val existingCreatedAt = if (reanalyse) withContext(Dispatchers.IO) { repo.get(sessionId)?.createdAt } else null
             val capture = withContext(Dispatchers.IO) {
                 repo.savePose(sessionId, track)
                 val capture = repo.loadCaptureInfo(sessionId)
@@ -114,7 +118,7 @@ class AnalysisViewModel(app: Application, handle: SavedStateHandle) : AndroidVie
                 repo.save(
                     Session(
                         id = sessionId,
-                        createdAt = System.currentTimeMillis(),
+                        createdAt = existingCreatedAt ?: System.currentTimeMillis(),
                         speedKmh = capture.speedKmh,
                         speedFromSensor = capture.speedFromSensor,
                         runnerHeightCm = heightCm,
@@ -144,7 +148,7 @@ class AnalysisViewModel(app: Application, handle: SavedStateHandle) : AndroidVie
 
     fun cancel() {
         job.cancel()
-        repo.delete(sessionId)
+        if (!reanalyse) repo.delete(sessionId)
     }
 }
 
