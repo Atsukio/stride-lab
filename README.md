@@ -72,3 +72,9 @@ app/src/main/java/com/atsukio/runningcoach/
   data/       Session storage in app-private files, settings
   ui/         Compose screens: home, capture, analysis progress, results
 ```
+
+## Licence and privacy
+
+Stride Lab is released under the [MIT License](LICENSE). The libraries and pose model it bundles keep their own
+licences, listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and shown in the app under **About**.
+See [PRIVACY.md](PRIVACY.md) for what the app stores and why.

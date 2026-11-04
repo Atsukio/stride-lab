@@ -48,6 +48,7 @@ fun CoachApp() {
                 },
                 onOpenRunSummary = { id -> nav.navigate("runsummary/$id") },
                 onOpenSession = { id -> nav.navigate("result/$id") },
+                onOpenAbout = { nav.navigate("about") },
             )
         }
         composable("run") {
@@ -106,6 +107,7 @@ fun CoachApp() {
                 onBack = { nav.popBackStack() },
             )
         }
+        composable("about") { AboutScreen(onBack = { nav.popBackStack() }) }
         composable("runsummary/{id}") { entry ->
             RunSummaryScreen(
                 id = entry.arguments?.getString("id").orEmpty(),
