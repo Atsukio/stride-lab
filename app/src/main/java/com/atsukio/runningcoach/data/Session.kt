@@ -29,6 +29,10 @@ data class Session(
     val runId: String? = null,
     /** Seconds from the start of the run to the start of this clip. */
     val runOffsetSec: Double? = null,
+    /** How long the analysis took after the clip was saved, in seconds. */
+    val processingSec: Double? = null,
+    /** Whether the poses came from analysing while recording. */
+    val analysedLive: Boolean = false,
 )
 
 /** What was known when a clip was captured, saved until the clip has been analysed. */

@@ -1,6 +1,7 @@
 package com.atsukio.runningcoach.ui
 
 import android.app.Application
+import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -42,6 +44,7 @@ import com.atsukio.runningcoach.pose.LiveResults
 import com.atsukio.runningcoach.pose.PoseExtractor
 import com.atsukio.runningcoach.pose.VideoInfo
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -61,6 +64,9 @@ class AnalysisViewModel(app: Application, handle: SavedStateHandle) : AndroidVie
     private val repo = SessionRepository(app)
     private val _state = MutableStateFlow<AnalysisState>(AnalysisState.Running(0f))
     val state = _state.asStateFlow()
+
+    /** When analysis started, on the [SystemClock.elapsedRealtime] clock, for the elapsed-time display. */
+    val startedAtMs = SystemClock.elapsedRealtime()
 
     private val job = viewModelScope.launch { run() }
 
@@ -122,6 +128,8 @@ class AnalysisViewModel(app: Application, handle: SavedStateHandle) : AndroidVie
                         sensor = capture.sensor,
                         runId = capture.runId,
                         runOffsetSec = capture.runOffsetSec,
+                        processingSec = (SystemClock.elapsedRealtime() - startedAtMs) / 1000.0,
+                        analysedLive = extraction.usedLive,
                     ),
                 )
                 capture
@@ -189,6 +197,7 @@ fun AnalysisScreen(
         ) {
             when (val s = state) {
                 is AnalysisState.Running -> {
+                    ElapsedTime(viewModel.startedAtMs)
                     Text("Finding the runner in each frame…", style = MaterialTheme.typography.titleMedium)
                     LinearProgressIndicator(progress = { s.progress }, modifier = Modifier.fillMaxWidth())
                     Text("${(s.progress * 100).roundToInt()}%")
@@ -200,6 +209,7 @@ fun AnalysisScreen(
                     OutlinedButton(onClick = cancel) { Text("Cancel") }
                 }
                 AnalysisState.Measuring, is AnalysisState.Done -> {
+                    ElapsedTime(viewModel.startedAtMs)
                     Text("Measuring your form…", style = MaterialTheme.typography.titleMedium)
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
@@ -211,4 +221,20 @@ fun AnalysisScreen(
             }
         }
     }
+}
+
+/** Seconds since analysis started, ticking, so speed changes can be compared clip to clip. */
+@Composable
+private fun ElapsedTime(startedAtMs: Long) {
+    var now by remember { mutableLongStateOf(SystemClock.elapsedRealtime()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = SystemClock.elapsedRealtime()
+            delay(100)
+        }
+    }
+    Text(
+        "%.1f s".format((now - startedAtMs) / 1000.0),
+        style = MaterialTheme.typography.headlineSmall,
+    )
 }

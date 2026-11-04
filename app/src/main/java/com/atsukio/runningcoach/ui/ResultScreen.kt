@@ -229,6 +229,9 @@ private fun Summary(session: Session, feedback: List<Feedback>) {
                 session.metrics?.let { "${it.stepCount} steps analysed" },
                 session.speedKmh?.let { "${formatSpeed(it)} km/h" + if (session.speedFromSensor) " (from watch)" else "" },
                 "${session.fps.roundToInt()} fps",
+                session.processingSec?.let {
+                    "analysed in %.1f s".format(it) + if (session.analysedLive) " (live)" else ""
+                },
             )
             Text(
                 details.joinToString(" · "),
