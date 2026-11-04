@@ -13,7 +13,9 @@ Everything runs on the phone: there is no internet permission, no cloud service,
 3. **Gait analysis** (`analysis/GaitAnalyzer.kt`) finds each foot landing and measures:
    cadence, overstride (ankle ahead of hips at landing), shin angle at landing, knee bend at landing and during stance,
    vertical bounce, trunk lean, elbow angle, and the left/right difference in landing distance.
-   Pixel distances are converted to centimetres using the runner's height (set in Settings).
+   Pixel distances are converted to centimetres from the treadmill belt when a speed is known: a planted foot
+   moves backwards at belt speed, which also gives an **estimated height** you can save to Settings.
+   Without a speed, the runner's height from Settings is used instead.
 4. **Coaching** (`analysis/Coach.kt`) turns the numbers into comments, cues and drills using fixed rules.
    Some thresholds adjust to the treadmill speed if you enter it. Results are compared with the previous session.
 5. **Replay** the clip at 1×, ½× or ¼× speed with the detected skeleton drawn on top. Each foot landing is ringed.

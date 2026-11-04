@@ -31,6 +31,13 @@ private class SyntheticRunner(
     private val stanceFraction = 0.35
     private val dir = if (facingRight) 1.0 else -1.0
 
+    /** Treadmill speed that matches the stance foot's movement, for a runner of [heightCm]. */
+    fun beltSpeedKmh(heightCm: Double): Double {
+        val pxPerSecond = (landingAheadPx + pushOffBehindPx) / (stanceFraction * 2 * 60.0 / cadence)
+        val cmPerPx = 0.49 * heightCm / (2 * segment)
+        return pxPerSecond * cmPerPx / 100 * 3.6
+    }
+
     fun track(seconds: Double): PoseTrack {
         val frames = (0 until (seconds * fps).toInt()).map { frame(it / fps.toDouble()) }
         return PoseTrack(fps, width, height, frames)
@@ -143,6 +150,52 @@ class GaitAnalyzerTest {
         val m = metricsOf(result)
         assertEquals(170.0, m.cadenceSpm!!, 3.0)
         assertTrue((result as GaitResult.Success).warnings.any { "fps" in it })
+    }
+
+    @Test
+    fun treadmillSpeedGivesHeightAndScale() {
+        val runner = SyntheticRunner()
+        val trueHeight = 185.0
+        val result = GaitAnalyzer.analyze(runner.track(12.0), runnerHeightCm = 165.0, beltSpeedKmh = runner.beltSpeedKmh(trueHeight))
+        val m = metricsOf(result)
+        assertEquals(trueHeight, m.estimatedHeightCm!!, 5.0)
+        assertTrue(m.scaledFromTreadmill)
+        // Distances follow the true height, not the wrong 165 cm setting.
+        assertEquals(60 * 0.49 * trueHeight / 400, m.overstrideCm!!, 2.0)
+        assertTrue((result as GaitResult.Success).warnings.any { "Settings" in it })
+    }
+
+    @Test
+    fun matchingHeightGivesNoWarning() {
+        val runner = SyntheticRunner()
+        val result = GaitAnalyzer.analyze(runner.track(12.0), runnerHeightCm = 175.0, beltSpeedKmh = runner.beltSpeedKmh(175.0))
+        assertEquals(175.0, metricsOf(result).estimatedHeightCm!!, 5.0)
+        assertTrue((result as GaitResult.Success).warnings.isEmpty())
+    }
+
+    @Test
+    fun treadmillCalibrationWorksFacingLeftAndAtThirtyFps() {
+        val runner = SyntheticRunner(facingRight = false, fps = 30f)
+        val m = metricsOf(GaitAnalyzer.analyze(runner.track(12.0), heightCm, runner.beltSpeedKmh(180.0)))
+        assertEquals(180.0, m.estimatedHeightCm!!, 7.0)
+    }
+
+    @Test
+    fun implausibleSpeedFallsBackToHeightSetting() {
+        val runner = SyntheticRunner()
+        val result = GaitAnalyzer.analyze(runner.track(12.0), heightCm, beltSpeedKmh = runner.beltSpeedKmh(175.0) * 3)
+        val m = metricsOf(result)
+        assertEquals(null, m.estimatedHeightCm)
+        assertTrue(!m.scaledFromTreadmill)
+        assertEquals(60 * cmPerPx, m.overstrideCm!!, 2.0)
+        assertTrue((result as GaitResult.Success).warnings.any { "doesn't match" in it })
+    }
+
+    @Test
+    fun noSpeedMeansNoEstimate() {
+        val m = metricsOf(analyze(SyntheticRunner()))
+        assertEquals(null, m.estimatedHeightCm)
+        assertTrue(!m.scaledFromTreadmill)
     }
 
     @Test

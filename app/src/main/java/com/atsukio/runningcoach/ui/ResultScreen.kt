@@ -72,6 +72,7 @@ import com.atsukio.runningcoach.analysis.FeedbackStatus
 import com.atsukio.runningcoach.analysis.GaitMetrics
 import com.atsukio.runningcoach.analysis.Landmark
 import com.atsukio.runningcoach.analysis.PoseTrack
+import com.atsukio.runningcoach.data.CoachSettings
 import com.atsukio.runningcoach.data.Session
 import com.atsukio.runningcoach.data.SessionRepository
 import kotlinx.coroutines.Dispatchers
@@ -178,6 +179,7 @@ private fun ResultContent(data: ResultData, video: File, padding: PaddingValues)
             )
         }
         item { Summary(session, feedback) }
+        metrics?.estimatedHeightCm?.let { item { HeightCard(it, fromWatch = session.speedFromSensor) } }
         items(feedback) { FeedbackCard(it) }
         if (session.warnings.isNotEmpty()) {
             item {
@@ -240,6 +242,44 @@ private fun Summary(session: Session, feedback: List<Feedback>) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+        }
+    }
+}
+
+/** The height measured from the treadmill belt, with an offer to save it when it differs from Settings. */
+@Composable
+private fun HeightCard(estimatedCm: Double, fromWatch: Boolean) {
+    val context = LocalContext.current
+    val settings = remember { CoachSettings(context) }
+    var savedCm by remember { mutableStateOf(settings.runnerHeightCm) }
+    val estimate = estimatedCm.roundToInt()
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Estimated height: $estimate cm", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Measured from how fast your planted foot moves with the treadmill belt" +
+                    if (fromWatch) ", using your watch's pace." else ".",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (abs(estimate - savedCm.roundToInt()) >= 2) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Settings: ${savedCm.roundToInt()} cm",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = {
+                        settings.runnerHeightCm = estimate.toDouble()
+                        savedCm = estimate.toDouble()
+                    }) { Text("Use $estimate cm") }
+                }
+            } else {
+                Text(
+                    "Matches your height in Settings.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }

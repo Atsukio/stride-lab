@@ -75,8 +75,13 @@ class AnalysisViewModel(app: Application, handle: SavedStateHandle) : AndroidVie
             val capture = withContext(Dispatchers.IO) {
                 repo.savePose(sessionId, track)
                 val capture = repo.loadCaptureInfo(sessionId)
-                val result = GaitAnalyzer.analyze(track, heightCm)
+                val result = GaitAnalyzer.analyze(track, heightCm, beltSpeedKmh = capture.speedKmh)
                 val success = result as? GaitResult.Success
+                val watchScaleNote = if (success?.metrics?.scaledFromTreadmill == true && capture.speedFromSensor) {
+                    "Distances were scaled from your watch's pace. Typing the treadmill's own speed is more accurate."
+                } else {
+                    null
+                }
                 val videoCadence = success?.metrics?.cadenceSpm
                 val watchCadence = capture.sensor?.cadenceSpm
                 val crossCheck = if (videoCadence != null && watchCadence != null) {
@@ -96,7 +101,7 @@ class AnalysisViewModel(app: Application, handle: SavedStateHandle) : AndroidVie
                         videoWidth = track.width,
                         videoHeight = track.height,
                         metrics = success?.metrics,
-                        warnings = success?.warnings.orEmpty() + listOfNotNull(crossCheck),
+                        warnings = success?.warnings.orEmpty() + listOfNotNull(crossCheck, watchScaleNote),
                         failure = (result as? GaitResult.Failure)?.reason,
                         sensor = capture.sensor,
                         runId = capture.runId,

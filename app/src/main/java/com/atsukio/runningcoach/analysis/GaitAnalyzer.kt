@@ -26,6 +26,10 @@ data class GaitMetrics(
     val overstrideAsymmetryCm: Double?,
     val stepCount: Int,
     val contactFrames: List<Int>,
+    /** Runner height worked out from the treadmill speed, when one was given. */
+    val estimatedHeightCm: Double? = null,
+    /** True when distances were scaled from the treadmill belt rather than the runner's height setting. */
+    val scaledFromTreadmill: Boolean = false,
 )
 
 sealed interface GaitResult {
@@ -36,8 +40,10 @@ sealed interface GaitResult {
 /**
  * Measures running form from a side-on pose track.
  *
- * Distances are worked out in pixels, then converted to centimetres by comparing the
- * runner's leg length in the image with the leg length expected for their height.
+ * Distances are worked out in pixels, then converted to centimetres. With a treadmill speed,
+ * the scale comes from the belt: a planted foot moves backwards across the image at belt speed.
+ * Otherwise the runner's leg length in the image is compared with the leg length expected for
+ * their height.
  * Left/right landmark labels are not trusted, because pose models often swap the legs
  * in side-on footage; the landing leg is always taken to be the one whose heel is lowest.
  */
@@ -59,7 +65,7 @@ object GaitAnalyzer {
         ),
     }
 
-    fun analyze(track: PoseTrack, runnerHeightCm: Double): GaitResult {
+    fun analyze(track: PoseTrack, runnerHeightCm: Double, beltSpeedKmh: Double? = null): GaitResult {
         val fps = track.fps.toDouble()
         val n = track.frames.size
         if (fps <= 0 || n < fps * 4) {
@@ -91,7 +97,6 @@ object GaitAnalyzer {
         }
 
         val dir = facing(s)
-        val cmPerPx = LEG_TO_HEIGHT * runnerHeightCm / legPx
 
         val contacts = mergeContacts(
             Side.entries.flatMap { detectContacts(s.y(it.heel), legPx) },
@@ -108,6 +113,25 @@ object GaitAnalyzer {
         val isRegular = { interval: Double -> interval in 0.6 * typical..1.6 * typical }
         val stepFrames = intervals.filter(isRegular).average()
         val cadence = 60.0 * fps / stepFrames
+
+        var estimatedHeight: Double? = null
+        val beltCmPerPx = beltSpeedKmh?.let { beltScale(s, contacts, intervals, isRegular, dir, fps, it) }
+        val cmPerPx = beltCmPerPx?.let { belt ->
+            val height = legPx * belt / LEG_TO_HEIGHT
+            if (height in 120.0..220.0) {
+                estimatedHeight = height
+                if (abs(height - runnerHeightCm) / runnerHeightCm > 0.08) {
+                    warnings += "From the treadmill speed you look about ${height.roundToInt()} cm tall, but Settings " +
+                        "says ${runnerHeightCm.roundToInt()} cm. Distances use the treadmill measurement; check the " +
+                        "speed was right, or update your height in Settings."
+                }
+                belt
+            } else {
+                warnings += "The treadmill speed doesn't match the video, so distances are based on your height " +
+                    "setting instead. Check the speed you entered."
+                null
+            }
+        } ?: (LEG_TO_HEIGHT * runnerHeightCm / legPx)
 
         // Per-landing measurements. NaN keeps each list aligned with `contacts`.
         val sides = contacts.map { landingSide(s, it) }
@@ -182,6 +206,8 @@ object GaitAnalyzer {
             overstrideAsymmetryCm = asymmetry(overstride, intervals, isRegular)?.let { it * cmPerPx },
             stepCount = contacts.size,
             contactFrames = contacts,
+            estimatedHeightCm = estimatedHeight,
+            scaledFromTreadmill = estimatedHeight != null,
         )
         return GaitResult.Success(metrics, warnings)
     }
@@ -195,6 +221,50 @@ object GaitAnalyzer {
             if (hip.isValid && knee.isValid && ankle.isValid) (knee - hip).length + (ankle - knee).length else null
         }
     }.percentile(0.9)
+
+    /**
+     * Centimetres per pixel from the treadmill belt. Early in each stance the foot is planted on the
+     * belt, so it moves backwards across the image at belt speed, whatever the runner's drift.
+     * Returns null unless at least four steps agree.
+     */
+    private fun beltScale(
+        s: Signals,
+        contacts: List<Int>,
+        intervals: List<Double>,
+        isRegular: (Double) -> Boolean,
+        dir: Double,
+        fps: Double,
+        beltSpeedKmh: Double,
+    ): Double? {
+        if (beltSpeedKmh < 3) return null
+        val pxPerSecond = intervals.indices.mapNotNull { i ->
+            if (!isRegular(intervals[i])) return@mapNotNull null
+            val side = landingSide(s, contacts[i]) ?: return@mapNotNull null
+            // Skip the moment of impact and stop before the heel lifts.
+            val start = contacts[i] + max(1, (0.1 * intervals[i]).roundToInt())
+            val end = contacts[i] + (0.45 * intervals[i]).roundToInt()
+            val frames = (start..end).filter { it < s.size && s.point(side.ankle, it).isValid }
+            if (frames.size < 3) return@mapNotNull null
+            val slope = slope(frames.map { it.toDouble() }, frames.map { s.point(side.ankle, it).x })
+            // A planted foot must travel backwards, against the direction the runner faces.
+            if (dir * slope >= 0) null else -dir * slope * fps
+        }
+        if (pxPerSecond.size < 4) return null
+        val median = pxPerSecond.median()!!
+        val spread = (pxPerSecond.percentile(0.75)!! - pxPerSecond.percentile(0.25)!!) / median
+        if (spread > 0.3) return null
+        val beltCmPerSecond = beltSpeedKmh / 3.6 * 100
+        return beltCmPerSecond / median
+    }
+
+    /** Least-squares slope of [ys] against [xs]. */
+    private fun slope(xs: List<Double>, ys: List<Double>): Double {
+        val mx = xs.average()
+        val my = ys.average()
+        val num = xs.indices.sumOf { (xs[it] - mx) * (ys[it] - my) }
+        val den = xs.sumOf { (it - mx) * (it - mx) }
+        return num / den
+    }
 
     /** Shoulder width relative to torso length: near zero side-on, large from the front or back. */
     private fun shoulderSpreadRatio(s: Signals): Double? {

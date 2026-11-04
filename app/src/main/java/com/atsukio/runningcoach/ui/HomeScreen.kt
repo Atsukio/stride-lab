@@ -245,7 +245,10 @@ private fun HeightDialog(initialCm: Double, onDismiss: () -> Unit, onSave: (Doub
         title = { Text("Runner's height") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Used to convert what the camera sees into centimetres.")
+                Text(
+                    "Used to convert what the camera sees into centimetres when there's no treadmill speed. " +
+                        "Enter a treadmill speed when recording and the app measures your height for you.",
+                )
                 OutlinedTextField(
                     value = text,
                     onValueChange = { text = it.filter(Char::isDigit).take(3) },
