@@ -117,7 +117,7 @@ class AnalysisViewModel(app: Application, handle: SavedStateHandle) : AndroidVie
                         videoWidth = track.width,
                         videoHeight = track.height,
                         metrics = success?.metrics,
-                        warnings = success?.warnings.orEmpty() + listOfNotNull(crossCheck, watchScaleNote),
+                        warnings = success?.warnings.orEmpty() + extraction.notes + listOfNotNull(crossCheck, watchScaleNote),
                         failure = (result as? GaitResult.Failure)?.reason,
                         sensor = capture.sensor,
                         runId = capture.runId,

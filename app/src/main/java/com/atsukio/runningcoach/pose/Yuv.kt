@@ -20,6 +20,8 @@ internal class YuvFrame(
     val uvPixelStride: Int,
     val left: Int = 0,
     val top: Int = 0,
+    /** 1 for 16-bit samples (P010), to read each sample's high byte. */
+    val sampleOffset: Int = 0,
 )
 
 internal object Yuv {
@@ -59,8 +61,8 @@ internal object Yuv {
                 }
                 val px = frame.left + sx
                 val py = frame.top + sy
-                val luma = frame.y[py * frame.yRowStride + px * frame.yPixelStride].toInt() and 0xff
-                val c = (py shr 1) * frame.uvRowStride + (px shr 1) * frame.uvPixelStride
+                val luma = frame.y[py * frame.yRowStride + px * frame.yPixelStride + frame.sampleOffset].toInt() and 0xff
+                val c = (py shr 1) * frame.uvRowStride + (px shr 1) * frame.uvPixelStride + frame.sampleOffset
                 val cb = (frame.u[c].toInt() and 0xff) - 128
                 val cr = (frame.v[c].toInt() and 0xff) - 128
                 val l = 298 * (luma - 16) + 128

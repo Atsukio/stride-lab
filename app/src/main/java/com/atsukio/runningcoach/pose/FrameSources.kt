@@ -18,7 +18,9 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /** An upright, downscaled video frame ready for pose detection. */
-internal class DecodedFrame(val bitmap: Bitmap, val timestampMs: Long)
+internal class DecodedFrame(val bitmap: Bitmap, val timestampUs: Long) {
+    val timestampMs get() = timestampUs / 1000
+}
 
 internal interface FrameSource {
     val name: String
@@ -87,11 +89,11 @@ internal class CodecFrameSource(
                 }
                 idleAfterInput = 0
                 val bitmap = if (info.size > 0) decoder.getOutputImage(outIndex)?.use(converter::toBitmap) else null
-                val timestampMs = info.presentationTimeUs / 1000
+                val timestampUs = info.presentationTimeUs
                 val end = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
                 decoder.releaseOutputBuffer(outIndex, false)
                 if (bitmap != null) {
-                    emit(DecodedFrame(bitmap, timestampMs))
+                    emit(DecodedFrame(bitmap, timestampUs))
                     if (++emitted >= limit) break
                 }
                 if (end) break
@@ -119,8 +121,12 @@ private class ImageConverter(private val rotation: Int, private val maxSide: Int
     private var pixels = IntArray(0)
 
     fun toBitmap(image: Image): Bitmap {
-        // 10-bit HDR output (P010) isn't handled here; the caller falls back to the slower path.
-        check(image.format == ImageFormat.YUV_420_888) { "Unsupported decoder output format ${image.format}" }
+        // 10-bit HDR (P010) stores 16-bit samples; reading each sample's high byte gives 8-bit values.
+        val highByte = when (image.format) {
+            ImageFormat.YUV_420_888 -> 0
+            YCBCR_P010 -> 1
+            else -> error("Unsupported decoder output format ${image.format}")
+        }
         val crop = image.cropRect
         val planes = image.planes
         y = copy(planes[0].buffer, y)
@@ -138,6 +144,7 @@ private class ImageConverter(private val rotation: Int, private val maxSide: Int
             uvPixelStride = planes[1].pixelStride,
             left = crop.left,
             top = crop.top,
+            sampleOffset = highByte,
         )
         val size = Yuv.uprightSize(frame.width, frame.height, rotation, maxSide)
         if (pixels.size != size.width * size.height) pixels = IntArray(size.width * size.height)
@@ -173,7 +180,7 @@ internal class RetrieverFrameSource(
             for ((i, bitmap) in bitmaps.withIndex()) {
                 val input = prepare(bitmap)
                 if (input !== bitmap) bitmap.recycle()
-                emit(DecodedFrame(input, ((index + i) * 1000.0 / info.playbackFps).toLong()))
+                emit(DecodedFrame(input, ((index + i) * 1_000_000.0 / info.playbackFps).toLong()))
             }
             index += bitmaps.size
         }
@@ -214,3 +221,6 @@ internal class RetrieverFrameSource(
         return frame
     }
 }
+
+/** ImageFormat.YCBCR_P010, named here because the constant needs API 33. */
+private const val YCBCR_P010 = 0x36

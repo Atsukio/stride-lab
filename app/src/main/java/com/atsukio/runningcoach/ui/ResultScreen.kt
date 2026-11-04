@@ -35,6 +35,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -353,7 +354,7 @@ private fun VideoReplay(
                     modifier = Modifier.fillMaxSize(),
                 )
                 if (showSkeleton && pose != null) {
-                    val frame = (positionMs / 1000.0 * playbackFps).toInt()
+                    val frame = frameAt(positionMs, playbackFps)
                     SkeletonOverlay(pose, frame, contactFrames, playbackFps, Modifier.fillMaxSize())
                 }
             }
@@ -369,6 +370,26 @@ private fun VideoReplay(
             }
             Spacer(Modifier.weight(1f))
             Switch(checked = showSkeleton, onCheckedChange = { showSkeleton = it })
+        }
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val frame = frameAt(positionMs, playbackFps)
+            fun step(by: Int) {
+                playing = false
+                player.playWhenReady = false
+                player.seekTo(frameStartMs((frame + by).coerceAtLeast(0), playbackFps))
+            }
+            OutlinedButton(onClick = { step(-1) }) { Text("‹ Frame") }
+            OutlinedButton(onClick = { step(1) }) { Text("Frame ›") }
+            Spacer(Modifier.weight(1f))
+            Text(
+                "Frame $frame · %.2f s".format(positionMs / 1000.0),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -406,3 +427,12 @@ private fun SkeletonOverlay(
 }
 
 private const val SURE_VISIBILITY = 0.5f
+
+/**
+ * The pose frame showing at [positionMs]. The player reports whole milliseconds, rounded down, so a
+ * frame starting at 16.7 ms shows as 16 ms; the extra millisecond keeps that on the right frame.
+ */
+private fun frameAt(positionMs: Long, fps: Float) = ((positionMs + 1) * fps / 1000.0).toInt()
+
+/** A position just inside frame [frame], for stepping one frame at a time. */
+private fun frameStartMs(frame: Int, fps: Float) = kotlin.math.ceil(frame * 1000.0 / fps).toLong()

@@ -48,6 +48,12 @@ class VideoInfo(
         val fps = count * 1000f / durationMs
         return VideoInfo(width, height, count, fps, captureFps(fps, slowMotionFps), rotation, indexed, durationMs, slowMotionFps)
     }
+
+    /** The same video put on an even timeline of [count] frames at [fps]; slow motion keeps its ratio. */
+    internal fun withTiming(count: Int, fps: Float): VideoInfo {
+        val slowMotion = captureFps / playbackFps
+        return VideoInfo(width, height, count, fps, fps * slowMotion, rotation, indexed, durationMs, slowMotionFps)
+    }
 }
 
 private fun captureFps(playbackFps: Float, slowMotionFps: Float?) =
@@ -59,8 +65,16 @@ private fun captureFps(playbackFps: Float, slowMotionFps: Float?) =
  */
 class PoseExtractor(private val context: Context, private val useGpu: Boolean = true) {
 
-    /** The pose track, plus any problems live analysis had (shown to the runner so they can turn it off). */
-    class Extraction(val track: PoseTrack, val usedLive: Boolean, val liveProblems: List<String>)
+    /**
+     * The pose track, plus any problems live analysis had (shown to the runner so they can turn it off)
+     * and [notes] about the video worth adding to the clip's warnings.
+     */
+    class Extraction(
+        val track: PoseTrack,
+        val usedLive: Boolean,
+        val liveProblems: List<String>,
+        val notes: List<String> = emptyList(),
+    )
 
     suspend fun extract(
         video: File,
@@ -90,7 +104,19 @@ class PoseExtractor(private val context: Context, private val useGpu: Boolean = 
                 null
             }
             val result = fast ?: detectAll(RetrieverFrameSource(retriever, info, MAX_INPUT_SIDE), info, onProgress)
-            if (fast != null && !info.indexed) {
+            var frames = result.frames
+            val notes = mutableListOf<String>()
+            // The fast path knows each frame's real time, so variable frame rates and late starts are handled.
+            val regular = if (fast != null) FrameTiming.regularise(result.frames, result.timesUs) else null
+            if (regular != null) {
+                frames = regular.frames
+                info = info.withTiming(frames.size, regular.fps)
+                onInfo(info)
+                regular.droppedToFps?.let {
+                    notes += "The camera's frame rate dropped to about ${it.roundToInt()} fps in parts of this clip, " +
+                        "usually because of dim light. More light gives more precise results."
+                }
+            } else if (fast != null && !info.indexed) {
                 // Without a frame count the estimate assumed 30 fps; now we know the real number.
                 info = info.withFrameCount(result.frames.size)
                 onInfo(info)
@@ -101,7 +127,7 @@ class PoseExtractor(private val context: Context, private val useGpu: Boolean = 
                 "Analysed ${result.frames.size} frames in %.1f s (%.0f fps) using ${result.source}, frames per detector: ${result.workers}; runner missing in ${result.frames.count { it == null }}"
                     .format(seconds, result.frames.size / max(seconds, 0.001f)),
             )
-            Extraction(PoseTrack(info.captureFps, info.width, info.height, result.frames), usedLive = false, problems)
+            Extraction(PoseTrack(info.captureFps, info.width, info.height, frames), usedLive = false, problems, notes)
         } finally {
             retriever.release()
         }
@@ -163,7 +189,7 @@ class PoseExtractor(private val context: Context, private val useGpu: Boolean = 
         return PoseTrack(info.captureFps, info.width, info.height, frames)
     }
 
-    private class Detected(val frames: List<FramePose?>, val source: String, val workers: String)
+    private class Detected(val frames: List<FramePose?>, val timesUs: LongArray, val source: String, val workers: String)
 
     private class Numbered(val index: Int, val frame: DecodedFrame)
 
@@ -183,6 +209,7 @@ class PoseExtractor(private val context: Context, private val useGpu: Boolean = 
                 }
             }
             val results = ArrayList<FramePose?>(info.frameCount)
+            val times = ArrayList<Long>(info.frameCount)
             val done = AtomicInteger()
             // One kind of detector per clip: GPU and CPU results differ slightly, and mixing them makes points jitter.
             val workers = List(if (useGpu) 1 else workerCount()) {
@@ -196,8 +223,12 @@ class PoseExtractor(private val context: Context, private val useGpu: Boolean = 
                                     val pose = landmarker.detect(item.frame.bitmap)
                                     item.frame.bitmap.recycle()
                                     synchronized(results) {
-                                        while (results.size <= item.index) results.add(null)
+                                        while (results.size <= item.index) {
+                                            results.add(null)
+                                            times.add(0L)
+                                        }
                                         results[item.index] = pose
+                                        times[item.index] = item.frame.timestampUs
                                     }
                                     count++
                                     onProgress(min(1f, done.incrementAndGet().toFloat() / info.frameCount))
@@ -208,7 +239,7 @@ class PoseExtractor(private val context: Context, private val useGpu: Boolean = 
                     }
                 }
             }.awaitAll()
-            Detected(results, source.name, workers.joinToString(", "))
+            Detected(results, times.toLongArray(), source.name, workers.joinToString(", "))
         }
 
     /** A second CPU detector only pays off when there are cores to spare beside the decoder. */

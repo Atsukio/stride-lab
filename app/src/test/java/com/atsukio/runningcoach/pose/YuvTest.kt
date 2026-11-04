@@ -84,3 +84,17 @@ class YuvTest {
         assertEquals(Yuv.Size(640, 360), Yuv.uprightSize(640, 360, 0, 960))
     }
 }
+
+class YuvP010Test {
+    @Test
+    fun readsTheHighByteOfSixteenBitSamples() {
+        // One 2x2 frame of 16-bit little-endian samples: Y high byte 200, chroma neutral (128).
+        val y = byteArrayOf(0, 200.toByte(), 0, 200.toByte(), 0, 200.toByte(), 0, 200.toByte())
+        val uv = byteArrayOf(0, 128.toByte(), 0, 128.toByte())
+        val pixels = IntArray(4)
+        Yuv.toArgb(YuvFrame(2, 2, y, 4, 2, uv, uv.copyOfRange(2, 4) + uv, 4, 4, sampleOffset = 1), 0, Yuv.Size(2, 2), pixels)
+        val grey = ((298 * (200 - 16) + 128) shr 8).coerceIn(0, 255)
+        assertEquals(grey, pixels[0] and 0xff)
+        assertEquals(grey, (pixels[3] shr 16) and 0xff)
+    }
+}
