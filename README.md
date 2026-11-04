@@ -1,4 +1,4 @@
-# Visual Running Coach
+# Stride Lab
 
 An Android app that watches a runner on a treadmill, measures their running form, and suggests improvements.
 Everything runs on the phone: there is no internet permission, no cloud service, and no backup of videos.

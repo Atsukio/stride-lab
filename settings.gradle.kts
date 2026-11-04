@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "VisualRunningCoach"
+rootProject.name = "StrideLab"
 include(":app")
