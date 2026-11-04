@@ -52,6 +52,7 @@ import com.atsukio.runningcoach.data.RunRecorder
 import com.atsukio.runningcoach.data.Session
 import com.atsukio.runningcoach.data.SessionRepository
 import com.atsukio.runningcoach.data.WholeRun
+import com.atsukio.runningcoach.pose.GpuCheck
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.DateFormat
@@ -243,6 +244,7 @@ private fun SessionCard(session: Session, onClick: () -> Unit) {
 
 @Composable
 private fun SettingsDialog(settings: CoachSettings, onDismiss: () -> Unit) {
+    val context = LocalContext.current
     var text by remember { mutableStateOf(settings.runnerHeightCm.roundToInt().toString()) }
     var seconds by remember { mutableIntStateOf(settings.recordSeconds) }
     var live by remember { mutableStateOf(settings.liveAnalysis) }
@@ -283,10 +285,17 @@ private fun SettingsDialog(settings: CoachSettings, onDismiss: () -> Unit) {
                     checked = live,
                     onChange = { live = it },
                 )
+                val gpuVerdict = remember { GpuCheck.verdict(context) }
                 SettingSwitch(
                     title = "Use the GPU for pose detection",
-                    detail = "Faster. Turn off if the skeleton doesn't line up with the runner; " +
-                        "some phones' graphics drivers give less accurate results.",
+                    detail = when (gpuVerdict) {
+                        GpuCheck.Verdict.DISAGREES ->
+                            "Not used on this phone: a check found its GPU results don't match the CPU's, so the CPU is used. " +
+                                "It's checked again after system updates."
+                        GpuCheck.Verdict.UNAVAILABLE -> "This phone's GPU can't run pose detection, so the CPU is used."
+                        else -> "Faster. The app checks the GPU against the CPU on first use and switches it off " +
+                            "if they disagree."
+                    },
                     checked = gpu,
                     onChange = { gpu = it },
                 )

@@ -184,12 +184,13 @@ class PoseExtractor(private val context: Context, private val useGpu: Boolean = 
             }
             val results = ArrayList<FramePose?>(info.frameCount)
             val done = AtomicInteger()
-            val workers = List(workerCount()) { i ->
+            // One kind of detector per clip: GPU and CPU results differ slightly, and mixing them makes points jitter.
+            val workers = List(if (useGpu) 1 else workerCount()) {
                 async {
                     // Each MediaPipe instance stays on its own thread.
                     Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { thread ->
                         withContext(thread) {
-                            Landmarker(context, preferGpu = useGpu && i == 0).use { landmarker ->
+                            Landmarker(context, preferGpu = useGpu).use { landmarker ->
                                 var count = 0
                                 for (item in decoded) {
                                     val pose = landmarker.detect(item.frame.bitmap)
@@ -210,7 +211,7 @@ class PoseExtractor(private val context: Context, private val useGpu: Boolean = 
             Detected(results, source.name, workers.joinToString(", "))
         }
 
-    /** A second, CPU detector only pays off when there are cores to spare beside the decoder. */
+    /** A second CPU detector only pays off when there are cores to spare beside the decoder. */
     private fun workerCount() = if (Runtime.getRuntime().availableProcessors() >= 6) 2 else 1
 
     private fun readInfo(r: MediaMetadataRetriever): VideoInfo {

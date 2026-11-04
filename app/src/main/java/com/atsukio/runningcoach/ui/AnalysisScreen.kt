@@ -37,6 +37,7 @@ import com.atsukio.runningcoach.analysis.GaitResult
 import com.atsukio.runningcoach.data.CoachSettings
 import com.atsukio.runningcoach.data.Session
 import com.atsukio.runningcoach.data.SessionRepository
+import com.atsukio.runningcoach.pose.GpuCheck
 import com.atsukio.runningcoach.pose.LiveResults
 import com.atsukio.runningcoach.pose.PoseExtractor
 import com.atsukio.runningcoach.pose.VideoInfo
@@ -67,9 +68,15 @@ class AnalysisViewModel(app: Application, handle: SavedStateHandle) : AndroidVie
         try {
             var info: VideoInfo? = null
             var lastPercent = -1
-            val extraction = PoseExtractor(getApplication(), useGpu = CoachSettings(getApplication()).useGpu).extract(
-                repo.videoFile(sessionId),
-                live = LiveResults.take(sessionId),
+            val app = getApplication<Application>()
+            val video = repo.videoFile(sessionId)
+            GpuCheck.ensureChecked(app, video)
+            val useGpu = GpuCheck.shouldUseGpu(app, CoachSettings(app).useGpu)
+            // Live poses found on a GPU that has since failed the check aren't trusted.
+            val live = LiveResults.take(sessionId)?.takeIf { useGpu || !it.usedGpu }
+            val extraction = PoseExtractor(app, useGpu = useGpu).extract(
+                video,
+                live = live,
                 onInfo = { info = it },
             ) { progress ->
                 val percent = (progress * 100).roundToInt()

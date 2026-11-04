@@ -24,6 +24,7 @@ class LiveResult internal constructor(
     internal val beginNs: Long,
     internal val gotHot: Boolean,
     internal val camera60Fps: Boolean,
+    internal val usedGpu: Boolean,
 )
 
 /** Hands live results from the capture screen to the analysis screen. */
@@ -44,7 +45,7 @@ object LiveResults {
  */
 class LivePoseAnalyzer(
     private val context: Context,
-    useGpu: Boolean,
+    private val useGpu: Boolean,
     private val camera60Fps: Boolean,
 ) : ImageAnalysis.Analyzer, AutoCloseable {
     private val lock = Any()
@@ -56,8 +57,9 @@ class LivePoseAnalyzer(
     private var lastFrameNs = 0L
     private var frameWidth = 0
     private var frameHeight = 0
-    private val workers = List(if (Runtime.getRuntime().availableProcessors() >= 6) 2 else 1) {
-        Worker(preferGpu = useGpu && it == 0)
+    // One kind of detector per clip, as in PoseExtractor: mixing GPU and CPU results makes points jitter.
+    private val workers = List(if (!useGpu && Runtime.getRuntime().availableProcessors() >= 6) 2 else 1) {
+        Worker(preferGpu = useGpu)
     }
 
     fun begin() = synchronized(lock) {
@@ -81,6 +83,7 @@ class LivePoseAnalyzer(
             beginNs = beginNs,
             gotHot = isHot(),
             camera60Fps = camera60Fps,
+            usedGpu = useGpu,
         )
         Log.i(TAG, "Live: ${thumbs.size} frames seen, ${poses.size} analysed")
         thumbs.clear()

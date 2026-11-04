@@ -84,6 +84,7 @@ import com.atsukio.runningcoach.data.CaptureInfo
 import com.atsukio.runningcoach.data.CoachSettings
 import com.atsukio.runningcoach.data.RunRecorder
 import com.atsukio.runningcoach.data.SessionRepository
+import com.atsukio.runningcoach.pose.GpuCheck
 import com.atsukio.runningcoach.pose.LivePoseAnalyzer
 import com.atsukio.runningcoach.pose.LiveResults
 import com.atsukio.runningcoach.sensors.SensorSample
@@ -206,7 +207,7 @@ fun CaptureScreen(
                         val analysis = liveAnalysisUseCase()
                         val camera = provider.bindToLifecycle(lifecycleOwner, selector, preview, capture, analysis)
                         val camera60Fps = camera.cameraInfo.supportedFrameRateRanges.any { it.upper >= 60 }
-                        analyzer = LivePoseAnalyzer(context, settings.useGpu, camera60Fps)
+                        analyzer = LivePoseAnalyzer(context, GpuCheck.shouldUseGpu(context, settings.useGpu), camera60Fps)
                             .also { analysis.setAnalyzer(analysisExecutor, it) }
                     } else {
                         provider.bindToLifecycle(lifecycleOwner, selector, preview, capture)
