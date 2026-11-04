@@ -15,6 +15,8 @@ import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -22,6 +24,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max
 import kotlin.math.min
 
@@ -83,7 +86,7 @@ class PoseExtractor(private val context: Context) {
             val seconds = (SystemClock.elapsedRealtime() - started) / 1000f
             Log.i(
                 TAG,
-                "Analysed ${result.frames.size} frames in %.1f s (%.0f fps) using ${result.source} and the ${if (result.gpu) "GPU" else "CPU"}; runner missing in ${result.frames.count { it == null }}"
+                "Analysed ${result.frames.size} frames in %.1f s (%.0f fps) using ${result.source}, frames per detector: ${result.workers}; runner missing in ${result.frames.count { it == null }}"
                     .format(seconds, result.frames.size / max(seconds, 0.001f)),
             )
             PoseTrack(info.captureFps, info.width, info.height, result.frames)
@@ -92,33 +95,55 @@ class PoseExtractor(private val context: Context) {
         }
     }
 
-    private class Detected(val frames: List<FramePose?>, val source: String, val gpu: Boolean)
+    private class Detected(val frames: List<FramePose?>, val source: String, val workers: String)
 
+    private class Numbered(val index: Int, val frame: DecodedFrame)
+
+    /**
+     * Decodes on one thread and detects on [workerCount] others. Every frame is independent in image mode,
+     * so a GPU detector and a CPU detector can share the work; results are put back in frame order.
+     */
     private suspend fun detectAll(source: FrameSource, info: VideoInfo, onProgress: (Float) -> Unit): Detected =
         coroutineScope {
-            val decoded = Channel<DecodedFrame>(BUFFERED_FRAMES)
+            val decoded = Channel<Numbered>(BUFFERED_FRAMES)
             launch {
                 try {
-                    source.frames { decoded.send(it) }
+                    var index = 0
+                    source.frames { decoded.send(Numbered(index++, it)) }
                 } finally {
                     decoded.close()
                 }
             }
-            // MediaPipe always runs on the same single thread.
-            Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { detectThread ->
-                withContext(detectThread) {
-                    Landmarker(context).use { landmarker ->
-                        val frames = ArrayList<FramePose?>(info.frameCount)
-                        for (frame in decoded) {
-                            frames += landmarker.detect(frame.bitmap)
-                            frame.bitmap.recycle()
-                            onProgress(min(1f, frames.size.toFloat() / info.frameCount))
+            val results = ArrayList<FramePose?>(info.frameCount)
+            val done = AtomicInteger()
+            val workers = List(workerCount()) { i ->
+                async {
+                    // Each MediaPipe instance stays on its own thread.
+                    Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { thread ->
+                        withContext(thread) {
+                            Landmarker(context, preferGpu = i == 0).use { landmarker ->
+                                var count = 0
+                                for (item in decoded) {
+                                    val pose = landmarker.detect(item.frame.bitmap)
+                                    item.frame.bitmap.recycle()
+                                    synchronized(results) {
+                                        while (results.size <= item.index) results.add(null)
+                                        results[item.index] = pose
+                                    }
+                                    count++
+                                    onProgress(min(1f, done.incrementAndGet().toFloat() / info.frameCount))
+                                }
+                                "${if (landmarker.usingGpu) "GPU" else "CPU"} $count"
+                            }
                         }
-                        Detected(frames, source.name, landmarker.usingGpu)
                     }
                 }
-            }
+            }.awaitAll()
+            Detected(results, source.name, workers.joinToString(", "))
         }
+
+    /** A second, CPU detector only pays off when there are cores to spare beside the decoder. */
+    private fun workerCount() = if (Runtime.getRuntime().availableProcessors() >= 6) 2 else 1
 
     private fun readInfo(r: MediaMetadataRetriever): VideoInfo {
         fun meta(key: Int) = r.extractMetadata(key)
@@ -156,11 +181,11 @@ class PoseExtractor(private val context: Context) {
 }
 
 /** Wraps PoseLandmarker, falling back from GPU to CPU on devices where the GPU delegate fails. */
-private class Landmarker(private val context: Context) : AutoCloseable {
-    var usingGpu = true
+private class Landmarker(private val context: Context, preferGpu: Boolean) : AutoCloseable {
+    var usingGpu = preferGpu
         private set
 
-    private var landmarker: PoseLandmarker = try {
+    private var landmarker: PoseLandmarker = if (!preferGpu) create(Delegate.CPU) else try {
         create(Delegate.GPU)
     } catch (e: Exception) {
         usingGpu = false
