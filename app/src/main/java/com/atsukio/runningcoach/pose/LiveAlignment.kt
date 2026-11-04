@@ -47,9 +47,18 @@ internal object LiveAlignment {
 
     /**
      * One pose per video frame, frame i being at [firstFrameNs] + i / [fps] on the camera clock. Uses the
-     * pose found for that frame, or interpolates between poses up to [maxGapNs] apart; null otherwise.
+     * pose found for that frame, or interpolates between poses up to [maxGapNs] apart. Across a longer gap
+     * it's null, or with [holdGaps] the earlier pose: when a video has no frames for a while (a screen
+     * recording of a paused video), the player keeps showing the last one.
      */
-    fun resample(poses: List<TimedPose>, firstFrameNs: Long, frameCount: Int, fps: Float, maxGapNs: Long): List<FramePose?> {
+    fun resample(
+        poses: List<TimedPose>,
+        firstFrameNs: Long,
+        frameCount: Int,
+        fps: Float,
+        maxGapNs: Long,
+        holdGaps: Boolean = false,
+    ): List<FramePose?> {
         val sorted = poses.sortedBy { it.timeNs }
         val times = LongArray(sorted.size) { sorted[it].timeNs }
         val tolerance = (1e9 / fps / 4).toLong()
@@ -61,7 +70,8 @@ internal object LiveAlignment {
             if (prev < 0 || next >= sorted.size) return@List null
             val a = sorted[prev]
             val b = sorted[next]
-            if (a.pose == null || b.pose == null || b.timeNs - a.timeNs > maxGapNs) return@List null
+            if (b.timeNs - a.timeNs > maxGapNs) return@List if (holdGaps) a.pose else null
+            if (a.pose == null || b.pose == null) return@List null
             lerp(a.pose, b.pose, (t - a.timeNs).toFloat() / (b.timeNs - a.timeNs))
         }
     }

@@ -47,3 +47,22 @@ class FrameTimingTest {
         assertEquals(0.05 + 10 / 60.0, regular.frames[13]!!.x[0].toDouble(), 0.01)
     }
 }
+
+class FrameTimingPauseTest {
+    private fun poseAt(seconds: Double) =
+        FramePose(FloatArray(33) { seconds.toFloat() }, FloatArray(33) { 0.5f }, FloatArray(33) { 1f })
+
+    @Test
+    fun aPauseHoldsTheLastFrameInsteadOfRunningAhead() {
+        // 2 s of running at 60 fps, a 3 s pause with no new frames (a paused screen recording), then 2 s more.
+        val times = (0 until 120).map { it * 1_000_000L / 60 } + (0 until 120).map { 5_000_000L + it * 1_000_000L / 60 }
+        val regular = FrameTiming.regularise(times.map { poseAt(it / 1e6) }, times.toLongArray())!!
+        assertEquals(60f, regular.fps, 0.5f)
+        assertNull("A pause isn't a slower camera", regular.droppedToFps)
+        val lastBeforePause = times[119] / 1e6
+        // Every frame during the pause shows the frame the player is still showing.
+        for (i in listOf(130, 200, 290)) assertEquals(lastBeforePause, regular.frames[i]!!.x[0].toDouble(), 1e-4)
+        // After the pause, frames are back in step with video time.
+        assertEquals(6.0, regular.frames[360]!!.x[0].toDouble(), 0.002)
+    }
+}

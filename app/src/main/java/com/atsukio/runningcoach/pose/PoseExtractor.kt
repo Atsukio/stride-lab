@@ -2,6 +2,8 @@ package com.atsukio.runningcoach.pose
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.os.SystemClock
 import android.util.Log
@@ -109,7 +111,9 @@ class PoseExtractor(private val context: Context, private val useGpu: Boolean = 
             val notes = mutableListOf<String>()
             // The fast path knows each frame's real time, so variable frame rates and late starts are handled,
             // and frames the second pass skipped are filled in.
-            val regular = fast?.let { FrameTiming.regularise(it.timesUs, it.poses) }
+            // The slow path counts frames, so take their real times from the file's index instead.
+            val timesUs = fast?.timesUs ?: sampleTimesUs(video)?.takeIf { abs(it.size - result.poses.size) <= 2 }
+            val regular = timesUs?.let { FrameTiming.regularise(it, result.poses) }
             val frames: List<FramePose?>
             if (regular != null) {
                 frames = regular.frames
@@ -195,6 +199,23 @@ class PoseExtractor(private val context: Context, private val useGpu: Boolean = 
         }
         return PoseTrack(info.captureFps, info.width, info.height, frames)
     }
+
+    /** Every video frame's presentation time in order, read from the file without decoding, or null. */
+    private fun sampleTimesUs(video: File): LongArray? = runCatching {
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(video.path)
+            val track = (0 until extractor.trackCount).first {
+                extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true
+            }
+            extractor.selectTrack(track)
+            FrameTiming.sampleTimesUs(
+                generateSequence { extractor.sampleTime.takeIf { it >= 0 }?.also { extractor.advance() } },
+            )
+        } finally {
+            extractor.release()
+        }
+    }.onFailure { Log.w(TAG, "Couldn't read frame times", it) }.getOrNull()
 
     /** Poses by frame position, for the frames that were analysed; [timesUs] is every frame's time (fast path only). */
     private class Detected(

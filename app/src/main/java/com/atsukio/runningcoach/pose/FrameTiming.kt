@@ -32,9 +32,11 @@ internal object FrameTiming {
         if (intervals.size < MIN_FRAMES) return null
         // The camera's full rate is the short, common interval; slow stretches only add longer ones.
         val step = intervals[intervals.size / 5]
-        val slow = intervals.count { it > step * 3 / 2 }
-        val droppedTo = if (slow > intervals.size * VARIABLE_FRACTION) {
-            1e6f / intervals[intervals.size * 9 / 10]
+        // Pauses (no new frames for a while) aren't a slower camera, so they don't count here.
+        val moving = intervals.filter { it < PAUSE_US }
+        val slow = moving.count { it > step * 3 / 2 }
+        val droppedTo = if (moving.isNotEmpty() && slow > moving.size * VARIABLE_FRACTION) {
+            1e6f / moving[moving.size * 9 / 10]
         } else {
             null
         }
@@ -43,10 +45,14 @@ internal object FrameTiming {
         val timed = poses.entries.filter { it.key in timesUs.indices }
             .map { LiveAlignment.TimedPose(timesUs[it.key] * 1000, it.value) }
         val maxGapNs = max(MIN_GAP_NS, step * 1000 * 5 / 2)
-        return Regular(LiveAlignment.resample(timed, 0, count, fps, maxGapNs), fps, droppedTo)
+        return Regular(LiveAlignment.resample(timed, 0, count, fps, maxGapNs, holdGaps = true), fps, droppedTo)
     }
 
     private const val MIN_FRAMES = 10
     private const val VARIABLE_FRACTION = 0.05
     private const val MIN_GAP_NS = 50_000_000L
+    private const val PAUSE_US = 250_000L
+
+    /** Presentation times of every frame in a video file, from its index; no decoding needed. */
+    fun sampleTimesUs(extractorTimes: Sequence<Long>): LongArray = extractorTimes.toList().sorted().toLongArray()
 }
