@@ -220,7 +220,7 @@ private fun Summary(session: Session, feedback: List<Feedback>) {
             }
             val details = listOfNotNull(
                 session.metrics?.let { "${it.stepCount} steps analysed" },
-                session.speedKmh?.let { "${formatSpeed(it)} km/h" },
+                session.speedKmh?.let { "${formatSpeed(it)} km/h" + if (session.speedFromSensor) " (from watch)" else "" },
                 "${session.fps.roundToInt()} fps",
             )
             Text(
@@ -228,6 +228,19 @@ private fun Summary(session: Session, feedback: List<Feedback>) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            session.sensor?.let { sensor ->
+                val watch = listOfNotNull(
+                    sensor.heartRate?.let { "♥ $it" },
+                    sensor.cadenceSpm?.let { "${it.roundToInt()} steps/min" },
+                ).joinToString(" · ")
+                if (watch.isNotEmpty()) {
+                    Text(
+                        "Watch during clip: $watch",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
     }
 }

@@ -18,6 +18,23 @@ Everything runs on the phone: there is no internet permission, no cloud service,
    Some thresholds adjust to the treadmill speed if you enter it. Results are compared with the previous session.
 5. **Replay** the clip at 1×, ½× or ¼× speed with the detected skeleton drawn on top. Each foot landing is ringed.
 
+## Watch and sensors
+
+The app connects to standard Bluetooth heart-rate and running speed/cadence sensors. That covers a Garmin
+Forerunner (965 etc.) in its **Virtual Run** activity, other watches broadcasting heart rate, chest straps
+and foot pods. Tap **Connect watch** on the capture or run screen. The device is remembered and reconnects automatically.
+
+- **Live readings** (heart rate, cadence, pace) appear while recording and are saved with each clip.
+- **Treadmill speed** is taken from the watch when you leave the speed field empty.
+- **Cadence cross-check:** if the video and the watch disagree by more than 8%, the clip is flagged.
+- **Whole run mode:** start a run from the home screen and take a clip every 10 minutes or so (a Bluetooth remote
+  press on the run screen opens the camera and starts the countdown). The run summary charts each form metric
+  over the run against heart rate and says what changed, e.g. "Overstride rose from 12 to 19 cm between
+  minute 5 and minute 40 (heart rate 142 → 168)."
+
+Readings never leave the phone. Bluetooth scanning is declared as not used for location (Android 12+).
+Keep the app open with the screen on during a whole run; it doesn't record in the background.
+
 ## Filming tips
 
 - Treadmill, with the phone side-on at hip height, about 2–3 m away.

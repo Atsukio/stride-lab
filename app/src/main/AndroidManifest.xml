@@ -5,6 +5,18 @@
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <uses-permission android:name="android.permission.CAMERA" />
 
+    <!-- Bluetooth heart-rate and running sensors, e.g. a Garmin watch in Virtual Run. Never used for location. -->
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- Android 9–11 can only scan for Bluetooth devices with these. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+
     <!-- Everything stays on the device: strip any network access libraries try to add. -->
     <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />

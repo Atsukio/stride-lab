@@ -1,6 +1,8 @@
 package com.atsukio.runningcoach.data
 
 import com.atsukio.runningcoach.analysis.GaitMetrics
+import com.atsukio.runningcoach.sensors.SensorSample
+import com.atsukio.runningcoach.sensors.SensorSummary
 import kotlinx.serialization.Serializable
 
 /** One analysed clip. [failure] is set instead of [metrics] when the clip couldn't be analysed. */
@@ -9,6 +11,8 @@ data class Session(
     val id: String,
     val createdAt: Long,
     val speedKmh: Double? = null,
+    /** True when [speedKmh] came from a connected watch or foot pod rather than being typed in. */
+    val speedFromSensor: Boolean = false,
     val runnerHeightCm: Double,
     /** Real-world frame rate used for timings. */
     val fps: Float,
@@ -19,4 +23,32 @@ data class Session(
     val metrics: GaitMetrics? = null,
     val warnings: List<String> = emptyList(),
     val failure: String? = null,
+    /** Watch or sensor readings averaged over the clip. */
+    val sensor: SensorSummary? = null,
+    /** Set when the clip was taken during a whole run. */
+    val runId: String? = null,
+    /** Seconds from the start of the run to the start of this clip. */
+    val runOffsetSec: Double? = null,
 )
+
+/** What was known when a clip was captured, saved until the clip has been analysed. */
+@Serializable
+data class CaptureInfo(
+    val speedKmh: Double? = null,
+    val speedFromSensor: Boolean = false,
+    val sensor: SensorSummary? = null,
+    val runId: String? = null,
+    val runOffsetSec: Double? = null,
+)
+
+/** A run during which several clips were taken, with sensor readings for the whole run. */
+@Serializable
+data class WholeRun(
+    val id: String,
+    val startedAt: Long,
+    val endedAt: Long? = null,
+    val samples: List<SensorSample> = emptyList(),
+) {
+    val durationSec: Double
+        get() = endedAt?.let { (it - startedAt) / 1000.0 } ?: samples.lastOrNull()?.tSec ?: 0.0
+}

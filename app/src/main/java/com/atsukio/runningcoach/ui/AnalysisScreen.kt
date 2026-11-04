@@ -25,6 +25,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.atsukio.runningcoach.analysis.CrossCheck
 import com.atsukio.runningcoach.analysis.GaitAnalyzer
 import com.atsukio.runningcoach.analysis.GaitResult
 import com.atsukio.runningcoach.data.CoachSettings
@@ -43,13 +44,12 @@ import kotlin.math.roundToInt
 sealed interface AnalysisState {
     data class Running(val progress: Float) : AnalysisState
     data object Measuring : AnalysisState
-    data object Done : AnalysisState
+    data class Done(val runId: String?) : AnalysisState
     data class Error(val message: String) : AnalysisState
 }
 
 class AnalysisViewModel(app: Application, handle: SavedStateHandle) : AndroidViewModel(app) {
     val sessionId: String = checkNotNull(handle["id"])
-    private val speedKmh = handle.get<String>("speed")?.toDoubleOrNull()
     private val repo = SessionRepository(app)
     private val _state = MutableStateFlow<AnalysisState>(AnalysisState.Running(0f))
     val state = _state.asStateFlow()
@@ -72,26 +72,40 @@ class AnalysisViewModel(app: Application, handle: SavedStateHandle) : AndroidVie
             }
             _state.value = AnalysisState.Measuring
             val heightCm = CoachSettings(getApplication()).runnerHeightCm
-            withContext(Dispatchers.IO) {
+            val capture = withContext(Dispatchers.IO) {
                 repo.savePose(sessionId, track)
+                val capture = repo.loadCaptureInfo(sessionId)
                 val result = GaitAnalyzer.analyze(track, heightCm)
+                val success = result as? GaitResult.Success
+                val videoCadence = success?.metrics?.cadenceSpm
+                val watchCadence = capture.sensor?.cadenceSpm
+                val crossCheck = if (videoCadence != null && watchCadence != null) {
+                    CrossCheck.cadence(videoCadence, watchCadence)
+                } else {
+                    null
+                }
                 repo.save(
                     Session(
                         id = sessionId,
                         createdAt = System.currentTimeMillis(),
-                        speedKmh = speedKmh,
+                        speedKmh = capture.speedKmh,
+                        speedFromSensor = capture.speedFromSensor,
                         runnerHeightCm = heightCm,
                         fps = track.fps,
                         playbackFps = info?.playbackFps ?: track.fps,
                         videoWidth = track.width,
                         videoHeight = track.height,
-                        metrics = (result as? GaitResult.Success)?.metrics,
-                        warnings = (result as? GaitResult.Success)?.warnings.orEmpty(),
+                        metrics = success?.metrics,
+                        warnings = success?.warnings.orEmpty() + listOfNotNull(crossCheck),
                         failure = (result as? GaitResult.Failure)?.reason,
+                        sensor = capture.sensor,
+                        runId = capture.runId,
+                        runOffsetSec = capture.runOffsetSec,
                     ),
                 )
+                capture
             }
-            _state.value = AnalysisState.Done
+            _state.value = AnalysisState.Done(capture.runId)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -107,7 +121,7 @@ class AnalysisViewModel(app: Application, handle: SavedStateHandle) : AndroidVie
 
 @Composable
 fun AnalysisScreen(
-    onFinished: (String) -> Unit,
+    onFinished: (id: String, runId: String?) -> Unit,
     onCancel: () -> Unit,
     viewModel: AnalysisViewModel = viewModel(),
 ) {
@@ -119,7 +133,7 @@ fun AnalysisScreen(
     BackHandler(onBack = cancel)
 
     LaunchedEffect(state) {
-        if (state == AnalysisState.Done) onFinished(viewModel.sessionId)
+        (state as? AnalysisState.Done)?.let { onFinished(viewModel.sessionId, it.runId) }
     }
 
     Scaffold { padding ->
@@ -140,7 +154,7 @@ fun AnalysisScreen(
                     )
                     OutlinedButton(onClick = cancel) { Text("Cancel") }
                 }
-                AnalysisState.Measuring, AnalysisState.Done -> {
+                AnalysisState.Measuring, is AnalysisState.Done -> {
                     Text("Measuring your form…", style = MaterialTheme.typography.titleMedium)
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                 }

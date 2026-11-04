@@ -37,28 +37,54 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.atsukio.runningcoach.analysis.Coach
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.atsukio.runningcoach.data.CoachSettings
+import com.atsukio.runningcoach.data.RunRecorder
 import com.atsukio.runningcoach.data.Session
 import com.atsukio.runningcoach.data.SessionRepository
+import com.atsukio.runningcoach.data.WholeRun
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.util.Date
 import kotlin.math.roundToInt
 
+private sealed interface HomeItem {
+    val time: Long
+
+    class Clip(val session: Session) : HomeItem {
+        override val time get() = session.createdAt
+    }
+
+    class Run(val run: WholeRun, val clipCount: Int) : HomeItem {
+        override val time get() = run.startedAt
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(onNewAnalysis: () -> Unit, onOpenSession: (String) -> Unit) {
+fun HomeScreen(
+    onNewAnalysis: () -> Unit,
+    onStartRun: () -> Unit,
+    onOpenRunSummary: (String) -> Unit,
+    onOpenSession: (String) -> Unit,
+) {
     val context = LocalContext.current
     val repo = remember { SessionRepository(context) }
     val settings = remember { CoachSettings(context) }
-    var sessions by remember { mutableStateOf<List<Session>?>(null) }
+    val activeRun by remember { RunRecorder.get(context) }.active.collectAsStateWithLifecycle()
+    var items by remember { mutableStateOf<List<HomeItem>?>(null) }
     var showSettings by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        sessions = withContext(Dispatchers.IO) {
+        items = withContext(Dispatchers.IO) {
             repo.deleteAbandoned()
-            repo.list()
+            val sessions = repo.list()
+            val clipCounts = sessions.groupingBy { it.runId }.eachCount()
+            val runs = repo.listRuns().filter { it.endedAt != null || it.id != activeRun?.id }
+            (sessions.filter { it.runId == null }.map { HomeItem.Clip(it) } +
+                runs.map { HomeItem.Run(it, clipCounts[it.id] ?: 0) })
+                .sortedByDescending { it.time }
         }
     }
 
@@ -81,7 +107,7 @@ fun HomeScreen(onNewAnalysis: () -> Unit, onOpenSession: (String) -> Unit) {
             )
         },
     ) { padding ->
-        val list = sessions
+        val list = items
         when {
             list == null -> Column(
                 Modifier.fillMaxSize().padding(padding),
@@ -97,9 +123,13 @@ fun HomeScreen(onNewAnalysis: () -> Unit, onOpenSession: (String) -> Unit) {
                 ),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                item { WholeRunCard(inProgress = activeRun != null, onClick = onStartRun) }
                 if (list.isEmpty()) item { FilmingTips() }
-                items(list, key = { it.id }) { session ->
-                    SessionCard(session, onClick = { onOpenSession(session.id) })
+                items(list, key = { if (it is HomeItem.Run) "run-${it.run.id}" else (it as HomeItem.Clip).session.id }) { item ->
+                    when (item) {
+                        is HomeItem.Clip -> SessionCard(item.session, onClick = { onOpenSession(item.session.id) })
+                        is HomeItem.Run -> RunCard(item.run, item.clipCount, onClick = { onOpenRunSummary(item.run.id) })
+                    }
                 }
             }
         }
@@ -131,6 +161,44 @@ fun FilmingTips(modifier: Modifier = Modifier) {
                 "Videos and results stay on this phone. Nothing is uploaded.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun WholeRunCard(inProgress: Boolean, onClick: () -> Unit) {
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                if (inProgress) "Run in progress: tap to return" else "Start a whole run",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                "Take a few clips during one run and see how your form changes as you tire, " +
+                    "alongside heart rate from your watch.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RunCard(run: WholeRun, clipCount: Int, onClick: () -> Unit) {
+    val heartRates = run.samples.mapNotNull { it.heartRate }
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Text(
+                "Whole run · " + DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(run.startedAt)),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                listOfNotNull(
+                    formatDuration(run.durationSec),
+                    "$clipCount ${if (clipCount == 1) "clip" else "clips"}",
+                    heartRates.takeIf { it.isNotEmpty() }?.let { "avg ♥ ${it.average().roundToInt()}" },
+                ).joinToString(" · "),
+                style = MaterialTheme.typography.bodyMedium,
             )
         }
     }

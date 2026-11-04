@@ -5,6 +5,8 @@ import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import com.atsukio.runningcoach.data.RunRecorder
+import com.atsukio.runningcoach.sensors.SensorHub
 import com.atsukio.runningcoach.ui.CoachApp
 import com.atsukio.runningcoach.ui.CoachTheme
 import com.atsukio.runningcoach.ui.ShutterKeys
@@ -22,6 +24,14 @@ class MainActivity : ComponentActivity() {
             CoachTheme {
                 CoachApp()
             }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Let go of the watch when the app is closed, unless a whole run is still going.
+        if (isFinishing && RunRecorder.get(this).active.value == null) {
+            SensorHub.get(this).disconnect(forget = false)
         }
     }
 

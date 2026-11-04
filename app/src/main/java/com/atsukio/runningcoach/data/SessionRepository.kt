@@ -12,10 +12,12 @@ import java.util.UUID
 
 /**
  * Stores each session in app-private storage: `sessions/<id>/` holds the video,
- * the pose track and the results. Nothing is written anywhere else.
+ * the pose track and the results, and `runs/<id>.json` holds whole runs.
+ * Nothing is written anywhere else.
  */
 class SessionRepository(context: Context) {
     private val root = File(context.filesDir, "sessions")
+    private val runsRoot = File(context.filesDir, "runs")
     private val json = Json { ignoreUnknownKeys = true }
 
     fun newSessionId(): String = UUID.randomUUID().toString()
@@ -45,6 +47,41 @@ class SessionRepository(context: Context) {
         root.listFiles().orEmpty()
             .filter { !File(it, SESSION_FILE).exists() && it.lastModified() < cutoff }
             .forEach { it.deleteRecursively() }
+    }
+
+    fun saveCaptureInfo(id: String, info: CaptureInfo) {
+        File(dir(id), CAPTURE_FILE).writeText(json.encodeToString(info))
+    }
+
+    fun loadCaptureInfo(id: String): CaptureInfo {
+        val file = File(File(root, id), CAPTURE_FILE)
+        if (!file.exists()) return CaptureInfo()
+        return runCatching { json.decodeFromString<CaptureInfo>(file.readText()) }.getOrDefault(CaptureInfo())
+    }
+
+    fun saveRun(run: WholeRun) {
+        runsRoot.mkdirs()
+        // Written to a temporary file first so a run in progress is never left half-written.
+        val temp = File(runsRoot, "${run.id}.tmp")
+        temp.writeText(json.encodeToString(run))
+        temp.renameTo(File(runsRoot, "${run.id}.json"))
+    }
+
+    fun getRun(id: String): WholeRun? {
+        val file = File(runsRoot, "$id.json")
+        if (!file.exists()) return null
+        return runCatching { json.decodeFromString<WholeRun>(file.readText()) }.getOrNull()
+    }
+
+    fun listRuns(): List<WholeRun> = runsRoot.listFiles().orEmpty()
+        .filter { it.extension == "json" }
+        .mapNotNull { getRun(it.nameWithoutExtension) }
+        .sortedByDescending { it.startedAt }
+
+    /** Deletes the run and every clip taken during it. */
+    fun deleteRun(id: String) {
+        list().filter { it.runId == id }.forEach { delete(it.id) }
+        File(runsRoot, "$id.json").delete()
     }
 
     fun savePose(id: String, track: PoseTrack) {
@@ -94,6 +131,7 @@ class SessionRepository(context: Context) {
 
     private companion object {
         const val SESSION_FILE = "session.json"
+        const val CAPTURE_FILE = "capture.json"
         const val POSE_FILE = "pose.bin"
         const val POSE_FORMAT = 1
     }

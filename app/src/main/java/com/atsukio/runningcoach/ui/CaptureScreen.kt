@@ -74,7 +74,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.atsukio.runningcoach.MainActivity
+import com.atsukio.runningcoach.data.CaptureInfo
+import com.atsukio.runningcoach.data.RunRecorder
 import com.atsukio.runningcoach.data.SessionRepository
+import com.atsukio.runningcoach.sensors.SensorSample
+import com.atsukio.runningcoach.sensors.SensorSummary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
@@ -93,12 +97,24 @@ private sealed interface CapturePhase {
     data object Saving : CapturePhase
 }
 
-/** Records a clip with the camera, or imports one from the gallery, into app-private storage. */
+/**
+ * Records a clip with the camera, or imports one from the gallery, into app-private storage.
+ * During a whole run ([runId] set) the clip is linked to the run, and [autoStart] begins the
+ * countdown straight away so a Bluetooth remote press on the run screen is all it takes.
+ */
 @Composable
-fun CaptureScreen(onBack: () -> Unit, onVideoReady: (id: String, speedKmh: Double?) -> Unit) {
+fun CaptureScreen(
+    runId: String?,
+    autoStart: Boolean,
+    onBack: () -> Unit,
+    onVideoReady: (id: String) -> Unit,
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val repo = remember { SessionRepository(context) }
+    val hub = rememberSensorHub()
+    val liveStats = rememberFreshStats(hub)
+    val runRecorder = remember { RunRecorder.get(context) }
     val scope = rememberCoroutineScope()
     val currentOnVideoReady by rememberUpdatedState(onVideoReady)
 
@@ -132,7 +148,8 @@ fun CaptureScreen(onBack: () -> Unit, onVideoReady: (id: String, speedKmh: Doubl
                 }.isSuccess
             }
             if (copied) {
-                currentOnVideoReady(id, speedKmh)
+                withContext(Dispatchers.IO) { repo.saveCaptureInfo(id, CaptureInfo(speedKmh = speedKmh)) }
+                currentOnVideoReady(id)
             } else {
                 repo.delete(id)
                 phase = CapturePhase.Idle
@@ -190,7 +207,10 @@ fun CaptureScreen(onBack: () -> Unit, onVideoReady: (id: String, speedKmh: Doubl
             }
             val id = repo.newSessionId()
             val file = repo.videoFile(id)
-            val speedAtStart = speedKmh
+            val typedSpeed = speedKmh
+            val run = runRecorder.active.value?.takeIf { it.id == runId }
+            val samples = mutableListOf<SensorSample>()
+            val startedAt = System.currentTimeMillis()
             recording = capture.output
                 .prepareRecording(context, FileOutputOptions.Builder(file).build())
                 .start(ContextCompat.getMainExecutor(context)) { event ->
@@ -201,14 +221,28 @@ fun CaptureScreen(onBack: () -> Unit, onVideoReady: (id: String, speedKmh: Doubl
                         phase = CapturePhase.Idle
                         error = "Recording failed. Please try again."
                     } else {
-                        currentOnVideoReady(id, speedAtStart)
+                        val sensor = SensorSummary.of(samples)
+                        val info = CaptureInfo(
+                            speedKmh = typedSpeed ?: sensor?.speedKmh,
+                            speedFromSensor = typedSpeed == null && sensor?.speedKmh != null,
+                            sensor = sensor,
+                            runId = run?.id,
+                            runOffsetSec = run?.let { (startedAt - it.startedAt) / 1000.0 },
+                        )
+                        repo.saveCaptureInfo(id, info)
+                        currentOnVideoReady(id)
                     }
                 }
-            val startedAt = System.currentTimeMillis()
+            var nextSampleMs = 0L
             while (true) {
-                val seconds = ((System.currentTimeMillis() - startedAt) / 1000).toInt()
+                val elapsedMs = System.currentTimeMillis() - startedAt
+                val seconds = (elapsedMs / 1000).toInt()
                 if (seconds >= MAX_RECORDING_SECONDS) break
                 phase = CapturePhase.Recording(seconds)
+                if (elapsedMs >= nextSampleMs) {
+                    hub.freshStats()?.let { samples += it.toSample(elapsedMs / 1000.0) }
+                    nextSampleMs += 1000
+                }
                 delay(200)
             }
             phase = CapturePhase.Saving
@@ -239,6 +273,14 @@ fun CaptureScreen(onBack: () -> Unit, onVideoReady: (id: String, speedKmh: Doubl
         onDispose { activity?.onShutterKey = null }
     }
 
+    var autoStarted by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(videoCapture) {
+        if (autoStart && !autoStarted && videoCapture != null) {
+            autoStarted = true
+            startCapture()
+        }
+    }
+
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         if (hasPermission) {
             AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
@@ -258,6 +300,8 @@ fun CaptureScreen(onBack: () -> Unit, onVideoReady: (id: String, speedKmh: Doubl
                 ) { Text("Allow camera") }
             }
         }
+
+        LiveStatsChip(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 60.dp))
 
         Row(
             Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp),
@@ -314,6 +358,9 @@ fun CaptureScreen(onBack: () -> Unit, onVideoReady: (id: String, speedKmh: Doubl
                         value = speedText,
                         onValueChange = { speedText = it.filter { c -> c.isDigit() || c == '.' || c == ',' }.take(4) },
                         label = { Text("Treadmill speed, km/h (optional)") },
+                        supportingText = liveStats?.speedKmh?.takeIf { it > 1 }?.let { watchSpeed ->
+                            { Text("Leave empty to use your watch: ${formatSpeed(watchSpeed)} km/h", color = Color.White) }
+                        },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier.fillMaxWidth(),
@@ -324,12 +371,16 @@ fun CaptureScreen(onBack: () -> Unit, onVideoReady: (id: String, speedKmh: Doubl
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    OutlinedButton(
-                        onClick = {
-                            importer.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
-                        },
-                        enabled = phase == CapturePhase.Idle,
-                    ) { Text("Import", color = Color.White) }
+                    if (runId == null) {
+                        OutlinedButton(
+                            onClick = {
+                                importer.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+                            },
+                            enabled = phase == CapturePhase.Idle,
+                        ) { Text("Import", color = Color.White) }
+                    } else {
+                        Box(Modifier.size(width = 96.dp, height = 1.dp))
+                    }
                     RecordButton(
                         phase = phase,
                         enabled = videoCapture != null && phase != CapturePhase.Saving,
