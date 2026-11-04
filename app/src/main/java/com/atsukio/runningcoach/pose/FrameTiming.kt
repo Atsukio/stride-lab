@@ -18,7 +18,16 @@ internal object FrameTiming {
     )
 
     fun regularise(frames: List<FramePose?>, timesUs: LongArray): Regular? {
-        if (frames.size < MIN_FRAMES || timesUs.size != frames.size) return null
+        if (timesUs.size != frames.size) return null
+        return regularise(timesUs, frames.indices.associateWith { frames[it] })
+    }
+
+    /**
+     * [timesUs] holds every frame's time; [poses] only the frames that were analysed (a null pose means
+     * the runner wasn't found). Frames that weren't analysed are filled in from their neighbours.
+     */
+    fun regularise(timesUs: LongArray, poses: Map<Int, FramePose?>): Regular? {
+        if (timesUs.size < MIN_FRAMES || poses.size < MIN_FRAMES) return null
         val intervals = (1 until timesUs.size).map { timesUs[it] - timesUs[it - 1] }.filter { it > 0 }.sorted()
         if (intervals.size < MIN_FRAMES) return null
         // The camera's full rate is the short, common interval; slow stretches only add longer ones.
@@ -31,7 +40,8 @@ internal object FrameTiming {
         }
         val count = (timesUs.last() / step.toDouble()).roundToInt() + 1
         val fps = 1e6f / step
-        val timed = frames.indices.map { LiveAlignment.TimedPose(timesUs[it] * 1000, frames[it]) }
+        val timed = poses.entries.filter { it.key in timesUs.indices }
+            .map { LiveAlignment.TimedPose(timesUs[it.key] * 1000, it.value) }
         val maxGapNs = max(MIN_GAP_NS, step * 1000 * 5 / 2)
         return Regular(LiveAlignment.resample(timed, 0, count, fps, maxGapNs), fps, droppedTo)
     }

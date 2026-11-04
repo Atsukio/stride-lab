@@ -13,7 +13,10 @@ import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
+import com.atsukio.runningcoach.analysis.GaitAnalyzer
+import com.atsukio.runningcoach.analysis.GaitResult
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -95,19 +98,19 @@ class PoseExtractor(private val context: Context, private val useGpu: Boolean = 
             }
             val started = SystemClock.elapsedRealtime()
             val fast = try {
-                detectAll(CodecFrameSource(video, info.rotation, MAX_INPUT_SIDE), info, onProgress)
-                    .takeIf { it.frames.isNotEmpty() }
+                detectFromCodec(video, info, onProgress).takeIf { it.poses.isNotEmpty() }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.w(TAG, "Fast decoding failed, using the slower frame-by-frame path", e)
                 null
             }
-            val result = fast ?: detectAll(RetrieverFrameSource(retriever, info, MAX_INPUT_SIDE), info, onProgress)
-            var frames = result.frames
+            val result = fast ?: detect(RetrieverFrameSource(retriever, info, MAX_INPUT_SIDE), info.frameCount, onProgress)
             val notes = mutableListOf<String>()
-            // The fast path knows each frame's real time, so variable frame rates and late starts are handled.
-            val regular = if (fast != null) FrameTiming.regularise(result.frames, result.timesUs) else null
+            // The fast path knows each frame's real time, so variable frame rates and late starts are handled,
+            // and frames the second pass skipped are filled in.
+            val regular = fast?.let { FrameTiming.regularise(it.timesUs, it.poses) }
+            val frames: List<FramePose?>
             if (regular != null) {
                 frames = regular.frames
                 info = info.withTiming(frames.size, regular.fps)
@@ -116,16 +119,20 @@ class PoseExtractor(private val context: Context, private val useGpu: Boolean = 
                     notes += "The camera's frame rate dropped to about ${it.roundToInt()} fps in parts of this clip, " +
                         "usually because of dim light. More light gives more precise results."
                 }
-            } else if (fast != null && !info.indexed) {
-                // Without a frame count the estimate assumed 30 fps; now we know the real number.
-                info = info.withFrameCount(result.frames.size)
-                onInfo(info)
+            } else {
+                val count = fast?.timesUs?.size ?: ((result.poses.keys.maxOrNull() ?: -1) + 1)
+                frames = List(count) { result.poses[it] }
+                if (fast != null && !info.indexed) {
+                    // Without a frame count the estimate assumed 30 fps; now we know the real number.
+                    info = info.withFrameCount(count)
+                    onInfo(info)
+                }
             }
             val seconds = (SystemClock.elapsedRealtime() - started) / 1000f
             Log.i(
                 TAG,
-                "Analysed ${result.frames.size} frames in %.1f s (%.0f fps) using ${result.source}, frames per detector: ${result.workers}; runner missing in ${result.frames.count { it == null }}"
-                    .format(seconds, result.frames.size / max(seconds, 0.001f)),
+                "Analysed ${frames.size} frames in %.1f s (%.0f fps), detected ${result.poses.size} using ${result.source}, frames per detector: ${result.workers}; runner missing in ${frames.count { it == null }}"
+                    .format(seconds, frames.size / max(seconds, 0.001f)),
             )
             Extraction(PoseTrack(info.captureFps, info.width, info.height, frames), usedLive = false, problems, notes)
         } finally {
@@ -189,60 +196,115 @@ class PoseExtractor(private val context: Context, private val useGpu: Boolean = 
         return PoseTrack(info.captureFps, info.width, info.height, frames)
     }
 
-    private class Detected(val frames: List<FramePose?>, val timesUs: LongArray, val source: String, val workers: String)
-
-    private class Numbered(val index: Int, val frame: DecodedFrame)
+    /** Poses by frame position, for the frames that were analysed; [timesUs] is every frame's time (fast path only). */
+    private class Detected(
+        val poses: Map<Int, FramePose?>,
+        val source: String,
+        val workers: String,
+        val timesUs: LongArray = LongArray(0),
+    )
 
     /**
-     * Decodes on one thread and detects on [workerCount] others. Every frame is independent in image mode,
-     * so a GPU detector and a CPU detector can share the work; results are put back in frame order.
+     * Two passes for 60 fps clips: every other frame first, then the skipped frames around each foot landing,
+     * where 60 fps matters. The rest of the stride is filled in from neighbouring frames. Falls back to every
+     * frame if the first pass can't find the landings.
      */
-    private suspend fun detectAll(source: FrameSource, info: VideoInfo, onProgress: (Float) -> Unit): Detected =
+    private suspend fun detectFromCodec(video: File, info: VideoInfo, onProgress: (Float) -> Unit): Detected {
+        val times = ArrayList<Long>(info.frameCount)
+        fun source(wanted: (Int) -> Boolean, lastWanted: Int = Int.MAX_VALUE, recordTimes: Boolean = false) =
+            CodecFrameSource(
+                video, info.rotation, MAX_INPUT_SIDE,
+                wanted = wanted,
+                lastWanted = lastWanted,
+                onFrameTime = { index, timeUs -> if (recordTimes && index == times.size) times += timeUs },
+            )
+
+        if (info.playbackFps < TWO_PASS_MIN_FPS || info.frameCount < TWO_PASS_MIN_FRAMES) {
+            val all = detect(source({ true }, recordTimes = true), info.frameCount, onProgress)
+            return Detected(all.poses, all.source, all.workers, times.toLongArray())
+        }
+        val first = detect(source({ it % 2 == 0 }, recordTimes = true), info.frameCount / 2) {
+            onProgress(it * FIRST_PASS_SHARE)
+        }
+        val timesUs = times.toLongArray()
+        val near = landingNeighbourhoods(first.poses, timesUs, info)
+        val todo = (near ?: timesUs.indices.toSet()) - first.poses.keys
+        Log.i(TAG, if (near != null) "Second pass: ${todo.size} frames around landings" else "Second pass: landings not found, every frame")
+        if (todo.isEmpty()) return Detected(first.poses, first.source, first.workers, timesUs)
+        val second = detect(source({ it in todo }, lastWanted = todo.max()), todo.size) {
+            onProgress(FIRST_PASS_SHARE + it * (1 - FIRST_PASS_SHARE))
+        }
+        return Detected(first.poses + second.poses, first.source, "${first.workers}; ${second.workers}", timesUs)
+    }
+
+    /** Frame positions within [LANDING_WINDOW_S] of each foot landing found in the first pass, or null. */
+    private fun landingNeighbourhoods(poses: Map<Int, FramePose?>, timesUs: LongArray, info: VideoInfo): Set<Int>? {
+        val regular = FrameTiming.regularise(timesUs, poses) ?: return null
+        val slowMotion = info.captureFps / info.playbackFps
+        val provisional = PoseTrack(regular.fps * slowMotion, info.width, info.height, regular.frames)
+        // Only the landing times are used here, so the height doesn't matter.
+        val metrics = (GaitAnalyzer.analyze(provisional, runnerHeightCm = 175.0) as? GaitResult.Success)?.metrics
+            ?: return null
+        if (metrics.contactFrames.size < 4) return null
+        val window = (LANDING_WINDOW_S * regular.fps).roundToInt()
+        val near = HashSet<Int>()
+        for (contact in metrics.contactFrames) {
+            val timeUs = (contact * 1e6 / regular.fps).toLong()
+            val centre = timesUs.indices.minBy { abs(timesUs[it] - timeUs) }
+            for (i in centre - window..centre + window) if (i in timesUs.indices) near += i
+        }
+        return near
+    }
+
+    /**
+     * Decodes on one thread and detects on others. Every frame is independent in image mode, so detectors
+     * share the work; results are keyed by frame position. [expected] is how many frames will come.
+     */
+    private suspend fun detect(source: FrameSource, expected: Int, onProgress: (Float) -> Unit): Detected =
         coroutineScope {
-            val decoded = Channel<Numbered>(BUFFERED_FRAMES)
+            val decoded = Channel<DecodedFrame>(BUFFERED_FRAMES)
             launch {
                 try {
-                    var index = 0
-                    source.frames { decoded.send(Numbered(index++, it)) }
+                    source.frames { decoded.send(it) }
                 } finally {
                     decoded.close()
                 }
             }
-            val results = ArrayList<FramePose?>(info.frameCount)
-            val times = ArrayList<Long>(info.frameCount)
+            val results = HashMap<Int, FramePose?>(expected * 2)
             val done = AtomicInteger()
             // One kind of detector per clip: GPU and CPU results differ slightly, and mixing them makes points jitter.
-            val workers = List(if (useGpu) 1 else workerCount()) {
+            val count = workerCount()
+            val onGpu = List(count) { CompletableDeferred<Boolean>() }
+            val workers = List(count) { i ->
                 async {
                     // Each MediaPipe instance stays on its own thread.
                     Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { thread ->
                         withContext(thread) {
                             Landmarker(context, preferGpu = useGpu).use { landmarker ->
-                                var count = 0
-                                for (item in decoded) {
-                                    val pose = landmarker.detect(item.frame.bitmap)
-                                    item.frame.bitmap.recycle()
-                                    synchronized(results) {
-                                        while (results.size <= item.index) {
-                                            results.add(null)
-                                            times.add(0L)
-                                        }
-                                        results[item.index] = pose
-                                        times[item.index] = item.frame.timestampUs
-                                    }
-                                    count++
-                                    onProgress(min(1f, done.incrementAndGet().toFloat() / info.frameCount))
+                                onGpu[i].complete(landmarker.usingGpu)
+                                // A detector that couldn't get the GPU sits out if another one did.
+                                if (!landmarker.usingGpu && onGpu.awaitAll().any { it }) return@withContext "CPU skipped"
+                                var handled = 0
+                                for (frame in decoded) {
+                                    val pose = landmarker.detect(frame.bitmap)
+                                    frame.bitmap.recycle()
+                                    synchronized(results) { results[frame.index] = pose }
+                                    handled++
+                                    onProgress(min(1f, done.incrementAndGet().toFloat() / max(1, expected)))
                                 }
-                                "${if (landmarker.usingGpu) "GPU" else "CPU"} $count"
+                                "${if (landmarker.usingGpu) "GPU" else "CPU"} $handled"
                             }
                         }
                     }
                 }
             }.awaitAll()
-            Detected(results, times.toLongArray(), source.name, workers.joinToString(", "))
+            Detected(results, source.name, workers.joinToString(", "))
         }
 
-    /** A second CPU detector only pays off when there are cores to spare beside the decoder. */
+    /**
+     * Two detectors overlap one frame's upload and read-back with another's work, on the GPU or the CPU,
+     * when there are cores to spare beside the decoder.
+     */
     private fun workerCount() = if (Runtime.getRuntime().availableProcessors() >= 6) 2 else 1
 
     private fun readInfo(r: MediaMetadataRetriever): VideoInfo {
@@ -275,7 +337,12 @@ class PoseExtractor(private val context: Context, private val useGpu: Boolean = 
     private companion object {
         const val TAG = "PoseExtractor"
         const val FALLBACK_FPS = 30f
-        const val MAX_INPUT_SIDE = 960
+        /** Frames are shrunk to this before detection; the model itself works at 256 px. */
+        const val MAX_INPUT_SIDE = 720
+        const val TWO_PASS_MIN_FPS = 50f
+        const val TWO_PASS_MIN_FRAMES = 240
+        const val FIRST_PASS_SHARE = 0.7f
+        const val LANDING_WINDOW_S = 0.07
         const val BUFFERED_FRAMES = 4
         const val ALIGN_FRAMES = 30
         const val MAX_LIVE_GAP_NS = 50_000_000L

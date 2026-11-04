@@ -181,7 +181,8 @@ class LivePoseAnalyzer(
         const val TAG = "LivePoseAnalyzer"
         const val PRE_ROLL_NS = 500_000_000L
         const val MAX_THUMBS = 4000
-        const val MAX_SIDE = 960
+        // Same as PoseExtractor.MAX_INPUT_SIDE, so live and video thumbnails are made from the same size.
+        const val MAX_SIDE = 720
     }
 
     private fun upright(raw: Bitmap, rotation: Int): Bitmap {

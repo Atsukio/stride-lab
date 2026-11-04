@@ -18,7 +18,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /** An upright, downscaled video frame ready for pose detection. */
-internal class DecodedFrame(val bitmap: Bitmap, val timestampUs: Long) {
+internal class DecodedFrame(val bitmap: Bitmap, val timestampUs: Long, val index: Int) {
     val timestampMs get() = timestampUs / 1000
 }
 
@@ -39,6 +39,12 @@ internal class CodecFrameSource(
     private val maxSide: Int,
     /** Stop after this many frames. */
     private val limit: Int = Int.MAX_VALUE,
+    /** Which frames (by position in the file) to convert and emit; the rest are decoded and skipped. */
+    private val wanted: (Int) -> Boolean = { true },
+    /** Stop once past this frame. */
+    private val lastWanted: Int = Int.MAX_VALUE,
+    /** Called with every frame's position and presentation time, wanted or not. */
+    private val onFrameTime: (index: Int, timeUs: Long) -> Unit = { _, _ -> },
 ) : FrameSource {
     override val name = "codec"
 
@@ -66,6 +72,7 @@ internal class CodecFrameSource(
             var inputDone = false
             var idleAfterInput = 0
             var emitted = 0
+            var frameIndex = 0
             while (true) {
                 currentCoroutineContext().ensureActive()
                 if (!inputDone) {
@@ -88,15 +95,22 @@ internal class CodecFrameSource(
                     continue
                 }
                 idleAfterInput = 0
-                val bitmap = if (info.size > 0) decoder.getOutputImage(outIndex)?.use(converter::toBitmap) else null
                 val timestampUs = info.presentationTimeUs
                 val end = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+                var index = -1
+                var bitmap: Bitmap? = null
+                if (info.size > 0) {
+                    index = frameIndex++
+                    onFrameTime(index, timestampUs)
+                    // Skipped frames never leave the decoder, which keeps a partial pass cheap.
+                    if (wanted(index)) bitmap = decoder.getOutputImage(outIndex)?.use(converter::toBitmap)
+                }
                 decoder.releaseOutputBuffer(outIndex, false)
                 if (bitmap != null) {
-                    emit(DecodedFrame(bitmap, timestampUs))
+                    emit(DecodedFrame(bitmap, timestampUs, index))
                     if (++emitted >= limit) break
                 }
-                if (end) break
+                if (end || index >= lastWanted) break
             }
         } finally {
             codec?.let {
@@ -180,7 +194,7 @@ internal class RetrieverFrameSource(
             for ((i, bitmap) in bitmaps.withIndex()) {
                 val input = prepare(bitmap)
                 if (input !== bitmap) bitmap.recycle()
-                emit(DecodedFrame(input, ((index + i) * 1_000_000.0 / info.playbackFps).toLong()))
+                emit(DecodedFrame(input, ((index + i) * 1_000_000.0 / info.playbackFps).toLong(), index + i))
             }
             index += bitmaps.size
         }

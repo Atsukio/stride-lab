@@ -43,7 +43,7 @@ object GpuCheck {
         val frames = try {
             val sampled = ArrayList<Bitmap>()
             var index = 0
-            CodecFrameSource(video, rotation, maxSide = 960, limit = SAMPLE_SPAN).frames { frame ->
+            CodecFrameSource(video, rotation, maxSide = 720, limit = SAMPLE_SPAN).frames { frame ->
                 if (index++ % SAMPLE_EVERY == 0) sampled.add(frame.bitmap) else frame.bitmap.recycle()
             }
             sampled
