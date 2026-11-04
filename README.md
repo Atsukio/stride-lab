@@ -11,6 +11,8 @@ Everything runs on the phone: there is no internet permission, no cloud service,
 2. **Pose detection.** [MediaPipe Pose Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker)
    (full model, bundled in the APK) finds 33 body landmarks in every frame. The video is decoded in one pass by the
    hardware decoder while earlier frames are still being analysed; files it can't handle fall back to a slower path.
+   Each frame is detected on its own, then the whole track is cleaned: swapped legs are put back, one-off jumps
+   removed and jitter smoothed without lagging behind fast feet (`analysis/PoseCleaner.kt`).
 3. **Gait analysis** (`analysis/GaitAnalyzer.kt`) finds each foot landing and measures:
    cadence, overstride (ankle ahead of hips at landing), shin angle at landing, knee bend at landing and during stance,
    vertical bounce, trunk lean, elbow angle, and the left/right difference in landing distance.

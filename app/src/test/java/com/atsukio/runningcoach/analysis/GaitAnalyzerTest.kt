@@ -12,7 +12,7 @@ import kotlin.math.sqrt
  * Generates a side-on stick-figure runner with known cadence, landing distance, lean and bounce.
  * Each leg is two 200 px segments, so the analyser should find a 400 px leg.
  */
-private class SyntheticRunner(
+internal class SyntheticRunner(
     val cadence: Double = 170.0,
     val landingAheadPx: Double = 60.0,
     val leanDeg: Double = 6.0,

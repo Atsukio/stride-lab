@@ -2,9 +2,8 @@ package com.atsukio.runningcoach.analysis
 
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.roundToInt
 
-/** Landmark positions in pixels over time, with short dropouts filled and jitter smoothed. */
+/** Cleaned landmark positions in pixels over time. */
 internal class Signals private constructor(
     private val xs: Array<DoubleArray>,
     private val ys: Array<DoubleArray>,
@@ -21,26 +20,10 @@ internal class Signals private constructor(
     fun y(landmark: Int): DoubleArray = ys[landmark]
 
     companion object {
+        /** Cleans [track] (see [PoseCleaner]) and converts it to pixels. */
         fun from(track: PoseTrack): Signals {
-            val n = track.frames.size
-            val xs = Array(Landmark.COUNT) { DoubleArray(n) { Double.NaN } }
-            val ys = Array(Landmark.COUNT) { DoubleArray(n) { Double.NaN } }
-            track.frames.forEachIndexed { f, pose ->
-                if (pose == null) return@forEachIndexed
-                for (i in 0 until Landmark.COUNT) {
-                    xs[i][f] = pose.x[i].toDouble() * track.width
-                    ys[i][f] = pose.y[i].toDouble() * track.height
-                }
-            }
-            val maxGap = max(1, (track.fps * 0.1).roundToInt())
-            val halfWindow = max(1, (track.fps / 60).roundToInt())
-            for (i in 0 until Landmark.COUNT) {
-                fillGaps(xs[i], maxGap)
-                fillGaps(ys[i], maxGap)
-                xs[i] = smooth(xs[i], halfWindow)
-                ys[i] = smooth(ys[i], halfWindow)
-            }
-            return Signals(xs, ys, n)
+            val clean = PoseCleaner.pixels(track)
+            return Signals(clean.xs, clean.ys, clean.size)
         }
     }
 }

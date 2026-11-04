@@ -83,7 +83,7 @@ class PoseExtractor(private val context: Context) {
             val seconds = (SystemClock.elapsedRealtime() - started) / 1000f
             Log.i(
                 TAG,
-                "Analysed ${result.frames.size} frames in %.1f s (%.0f fps) using ${result.source} and the ${if (result.gpu) "GPU" else "CPU"}"
+                "Analysed ${result.frames.size} frames in %.1f s (%.0f fps) using ${result.source} and the ${if (result.gpu) "GPU" else "CPU"}; runner missing in ${result.frames.count { it == null }}"
                     .format(seconds, result.frames.size / max(seconds, 0.001f)),
             )
             PoseTrack(info.captureFps, info.width, info.height, result.frames)
@@ -109,12 +109,8 @@ class PoseExtractor(private val context: Context) {
                 withContext(detectThread) {
                     Landmarker(context).use { landmarker ->
                         val frames = ArrayList<FramePose?>(info.frameCount)
-                        var lastMs = -1L
                         for (frame in decoded) {
-                            // Video mode needs strictly increasing timestamps.
-                            val timestampMs = max(frame.timestampMs, lastMs + 1)
-                            lastMs = timestampMs
-                            frames += landmarker.detect(frame.bitmap, timestampMs)
+                            frames += landmarker.detect(frame.bitmap)
                             frame.bitmap.recycle()
                             onProgress(min(1f, frames.size.toFloat() / info.frameCount))
                         }
@@ -171,16 +167,16 @@ private class Landmarker(private val context: Context) : AutoCloseable {
         create(Delegate.CPU)
     }
 
-    fun detect(bitmap: Bitmap, timestampMs: Long): FramePose? {
+    fun detect(bitmap: Bitmap): FramePose? {
         val image = BitmapImageBuilder(bitmap).build()
         val result = try {
-            landmarker.detectForVideo(image, timestampMs)
+            landmarker.detect(image)
         } catch (e: RuntimeException) {
             if (!usingGpu) throw e
             usingGpu = false
             landmarker.close()
             landmarker = create(Delegate.CPU)
-            landmarker.detectForVideo(image, timestampMs)
+            landmarker.detect(image)
         }
         val points = result.landmarks().firstOrNull() ?: return null
         if (points.size < Landmark.COUNT) return null
@@ -200,11 +196,12 @@ private class Landmarker(private val context: Context) : AutoCloseable {
             .build()
         val options = PoseLandmarker.PoseLandmarkerOptions.builder()
             .setBaseOptions(base)
-            .setRunningMode(RunningMode.VIDEO)
+            // Image mode: each frame on its own. Video mode's tracking filter makes fast feet trail behind;
+            // PoseCleaner smooths the whole clip afterwards without that lag.
+            .setRunningMode(RunningMode.IMAGE)
             .setNumPoses(1)
             .setMinPoseDetectionConfidence(0.5f)
             .setMinPosePresenceConfidence(0.5f)
-            .setMinTrackingConfidence(0.5f)
             .build()
         return PoseLandmarker.createFromOptions(context, options)
     }

@@ -71,6 +71,7 @@ import com.atsukio.runningcoach.analysis.Feedback
 import com.atsukio.runningcoach.analysis.FeedbackStatus
 import com.atsukio.runningcoach.analysis.GaitMetrics
 import com.atsukio.runningcoach.analysis.Landmark
+import com.atsukio.runningcoach.analysis.PoseCleaner
 import com.atsukio.runningcoach.analysis.PoseTrack
 import com.atsukio.runningcoach.data.CoachSettings
 import com.atsukio.runningcoach.data.Session
@@ -102,7 +103,7 @@ fun ResultScreen(id: String, onBack: () -> Unit) {
         val loaded = withContext(Dispatchers.IO) {
             val session = repo.get(id) ?: return@withContext null
             val previous = repo.list().firstOrNull { it.createdAt < session.createdAt && it.metrics != null }
-            ResultData(session, repo.loadPose(id), previous?.metrics)
+            ResultData(session, repo.loadPose(id)?.let(PoseCleaner::clean), previous?.metrics)
         }
         data = loaded
         notFound = loaded == null
@@ -385,15 +386,23 @@ private fun SkeletonOverlay(
         val pose = track.frames.getOrNull(frame) ?: return@Canvas
         fun point(i: Int) = Offset(pose.x[i] * size.width, pose.y[i] * size.height)
         val stroke = 3.dp.toPx()
-        Landmark.LEFT_CONNECTIONS.forEach { (a, b) -> drawLine(LeftColor, point(a), point(b), stroke, StrokeCap.Round) }
-        Landmark.RIGHT_CONNECTIONS.forEach { (a, b) -> drawLine(RightColor, point(a), point(b), stroke, StrokeCap.Round) }
-        Landmark.CENTER_CONNECTIONS.forEach { (a, b) -> drawLine(Color.White, point(a), point(b), stroke, StrokeCap.Round) }
-        drawCircle(Color.White, radius = 5.dp.toPx(), center = point(Landmark.NOSE))
+        fun limb(color: Color, a: Int, b: Int) {
+            if (pose.x[a].isNaN() || pose.x[b].isNaN()) return
+            // Points the detector wasn't sure of (often the far leg, hidden behind the near one) are drawn faintly.
+            val sure = pose.visibility[a] >= SURE_VISIBILITY && pose.visibility[b] >= SURE_VISIBILITY
+            drawLine(if (sure) color else color.copy(alpha = 0.35f), point(a), point(b), stroke, StrokeCap.Round)
+        }
+        Landmark.LEFT_CONNECTIONS.forEach { (a, b) -> limb(LeftColor, a, b) }
+        Landmark.RIGHT_CONNECTIONS.forEach { (a, b) -> limb(RightColor, a, b) }
+        Landmark.CENTER_CONNECTIONS.forEach { (a, b) -> limb(Color.White, a, b) }
+        if (!pose.x[Landmark.NOSE].isNaN()) drawCircle(Color.White, radius = 5.dp.toPx(), center = point(Landmark.NOSE))
 
         // Ring the landing foot for a moment at each detected foot strike.
         if (contactFrames.any { abs(it - frame) <= landingWindow }) {
             val heel = if (pose.y[Landmark.LEFT_HEEL] >= pose.y[Landmark.RIGHT_HEEL]) Landmark.LEFT_ANKLE else Landmark.RIGHT_ANKLE
-            drawCircle(LandingColor, radius = 14.dp.toPx(), center = point(heel), style = Stroke(stroke))
+            if (!pose.x[heel].isNaN()) drawCircle(LandingColor, radius = 14.dp.toPx(), center = point(heel), style = Stroke(stroke))
         }
     }
 }
+
+private const val SURE_VISIBILITY = 0.5f
