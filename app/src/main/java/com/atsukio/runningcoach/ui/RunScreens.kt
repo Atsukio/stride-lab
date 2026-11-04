@@ -162,6 +162,7 @@ fun RunScreen(
                 }
             }
             item { LiveStatsChip() }
+            item { MetronomeControl() }
             item {
                 val lastOffset = clips.mapNotNull { it.runOffsetSec }.maxOrNull()
                 val hint = if (lastOffset == null) {

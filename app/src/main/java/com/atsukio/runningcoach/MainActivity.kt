@@ -5,6 +5,7 @@ import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import com.atsukio.runningcoach.audio.Metronome
 import com.atsukio.runningcoach.data.RunRecorder
 import com.atsukio.runningcoach.sensors.SensorHub
 import com.atsukio.runningcoach.ui.CoachApp
@@ -33,6 +34,7 @@ class MainActivity : ComponentActivity() {
         if (isFinishing && RunRecorder.get(this).active.value == null) {
             SensorHub.get(this).disconnect(forget = false)
         }
+        if (isFinishing) Metronome.stop()
     }
 
     // Handled here rather than in Compose because volume keys only reach Compose when something has focus.

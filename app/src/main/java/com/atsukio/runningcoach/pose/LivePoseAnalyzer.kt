@@ -8,6 +8,10 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
+import com.atsukio.runningcoach.analysis.FramePose
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -27,6 +31,9 @@ class LiveResult internal constructor(
     internal val usedGpu: Boolean,
 )
 
+/** The latest live pose, for drawing on the camera preview and checking framing. */
+class LivePreview(val pose: FramePose?, val brightness: Int, val frameWidth: Int, val frameHeight: Int)
+
 /** Hands live results from the capture screen to the analysis screen. */
 object LiveResults {
     private val results = ConcurrentHashMap<String, LiveResult>()
@@ -39,7 +46,8 @@ object LiveResults {
 }
 
 /**
- * Runs pose detection on camera frames while a clip records. Every frame gets a tiny thumbnail so the
+ * Runs pose detection on camera frames: a few times a second before recording, for the framing check,
+ * and on every frame it can keep up with while a clip records. Every frame gets a tiny thumbnail so the
  * poses can be matched to the saved video afterwards; frames that arrive while the detectors are busy
  * are skipped for detection. [begin] and [end] bracket one recording.
  */
@@ -61,6 +69,11 @@ class LivePoseAnalyzer(
     private val workers = List(if (!useGpu && Runtime.getRuntime().availableProcessors() >= 6) 2 else 1) {
         Worker(preferGpu = useGpu)
     }
+    private var lastPreviewNs = 0L
+    private val _preview = MutableStateFlow<LivePreview?>(null)
+
+    /** Updated about ten times a second before recording, and as often as possible during it. */
+    val preview: StateFlow<LivePreview?> = _preview.asStateFlow()
 
     fun begin() = synchronized(lock) {
         recording = true
@@ -98,6 +111,7 @@ class LivePoseAnalyzer(
             val thumb = Thumbnails.of(upright, timeNs)
             val gen: Int
             val active: Boolean
+            val previewDue: Boolean
             synchronized(lock) {
                 lastFrameNs = timeNs
                 frameWidth = upright.width
@@ -107,8 +121,13 @@ class LivePoseAnalyzer(
                 while (thumbs.size > MAX_THUMBS) thumbs.removeFirst()
                 gen = generation
                 active = recording
+                // Before recording, a few poses a second is plenty for the framing check and saves battery.
+                previewDue = !recording && timeNs - lastPreviewNs >= PREVIEW_INTERVAL_NS
+                if (previewDue) lastPreviewNs = timeNs
             }
-            val handedOver = active && workers.any { it.tryDetect(upright, timeNs, gen) }
+            val brightness = thumb.gray.sumOf { it.toInt() and 0xff } / max(1, thumb.gray.size)
+            val handedOver = (active || previewDue) &&
+                workers.any { it.tryDetect(upright, timeNs, gen, brightness) }
             if (!handedOver) upright.recycle()
         } catch (e: Exception) {
             Log.w(TAG, "Live frame failed", e)
@@ -147,7 +166,7 @@ class LivePoseAnalyzer(
             }
         }
 
-        fun tryDetect(bitmap: Bitmap, timeNs: Long, gen: Int): Boolean {
+        fun tryDetect(bitmap: Bitmap, timeNs: Long, gen: Int, brightness: Int): Boolean {
             val detector = landmarker ?: return false
             if (!busy.compareAndSet(false, true)) return false
             try {
@@ -157,6 +176,7 @@ class LivePoseAnalyzer(
                         synchronized(lock) {
                             if (gen == generation && recording) poses += LiveAlignment.TimedPose(timeNs, pose)
                         }
+                        _preview.value = LivePreview(pose, brightness, bitmap.width, bitmap.height)
                     } catch (e: Exception) {
                         Log.w(TAG, "Live detection failed", e)
                     } finally {
@@ -180,6 +200,7 @@ class LivePoseAnalyzer(
     private companion object {
         const val TAG = "LivePoseAnalyzer"
         const val PRE_ROLL_NS = 500_000_000L
+        const val PREVIEW_INTERVAL_NS = 100_000_000L
         const val MAX_THUMBS = 4000
         // Same as PoseExtractor.MAX_INPUT_SIDE, so live and video thumbnails are made from the same size.
         const val MAX_SIDE = 720

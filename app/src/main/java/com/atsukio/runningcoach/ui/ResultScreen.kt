@@ -328,6 +328,16 @@ private fun FeedbackCard(item: Feedback) {
             item.cue?.let { Text("Cue: \"$it\"", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold) }
             item.drill?.let { Text("Drill: $it", style = MaterialTheme.typography.bodyMedium) }
             item.scale?.let { RangeBar(it, markerColor = tint, goodColor = GoodColor) }
+            item.metronomeSpm?.let { spm ->
+                val context = LocalContext.current
+                var set by remember { mutableStateOf(false) }
+                TextButton(onClick = {
+                    CoachSettings(context).metronomeSpm = spm
+                    set = true
+                }, enabled = !set) {
+                    Text(if (set) "Metronome set to $spm: find it on the camera and run screens" else "Set the metronome to $spm")
+                }
+            }
         }
     }
 }

@@ -25,6 +25,7 @@ import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -67,7 +68,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
@@ -79,13 +82,17 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.atsukio.runningcoach.MainActivity
+import com.atsukio.runningcoach.analysis.Framing
+import com.atsukio.runningcoach.analysis.Landmark
 import com.atsukio.runningcoach.data.CaptureInfo
 import com.atsukio.runningcoach.data.CoachSettings
 import com.atsukio.runningcoach.data.RunRecorder
 import com.atsukio.runningcoach.data.SessionRepository
 import com.atsukio.runningcoach.pose.GpuCheck
 import com.atsukio.runningcoach.pose.LivePoseAnalyzer
+import com.atsukio.runningcoach.pose.LivePreview
 import com.atsukio.runningcoach.pose.LiveResults
 import com.atsukio.runningcoach.sensors.SensorSample
 import com.atsukio.runningcoach.sensors.SensorSummary
@@ -94,6 +101,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 import java.util.concurrent.Executors
 import kotlin.coroutines.suspendCoroutine
@@ -181,7 +189,13 @@ fun CaptureScreen(
         if (!hasPermission) return@LaunchedEffect
         val provider = cameraProvider(context)
         val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
-        val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
+        // 16:9 like the video, so the preview shows exactly what gets recorded and analysed.
+        val preview = Preview.Builder()
+            .setResolutionSelector(
+                ResolutionSelector.Builder().setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY).build(),
+            )
+            .build()
+            .also { it.setSurfaceProvider(previewView.surfaceProvider) }
         fun recorder() = Recorder.Builder()
             .setQualitySelector(QualitySelector.from(Quality.FHD, FallbackStrategy.lowerQualityOrHigherThan(Quality.FHD)))
             .build()
@@ -329,8 +343,11 @@ fun CaptureScreen(
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
+        val noPreview = remember { MutableStateFlow<LivePreview?>(null) }
+        val livePreview by (liveAnalyzer?.preview ?: noPreview).collectAsStateWithLifecycle()
         if (hasPermission) {
             AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+            livePreview?.let { LiveSkeleton(it, mirrored = lensFacing == CameraSelector.LENS_FACING_FRONT, Modifier.fillMaxSize()) }
         } else {
             Column(
                 Modifier.fillMaxSize().padding(32.dp),
@@ -363,7 +380,17 @@ fun CaptureScreen(
                         "● 0:%02d / 0:%02d".format(p.seconds, maxSeconds) + if (liveAnalyzer != null) " · analysing" else "",
                         color = Color(0xFFFF5252),
                     )
-                    CapturePhase.Idle -> OverlayLabel("Side-on · whole body in frame · hip height")
+                    CapturePhase.Idle -> {
+                        val advice = livePreview?.let { Framing.check(it.pose, it.brightness) }
+                        OverlayLabel(
+                            advice?.message ?: "Side-on · whole body in frame · hip height",
+                            color = when (advice?.good) {
+                                true -> Color(0xFF81C784)
+                                false -> Color(0xFFFFD54F)
+                                null -> Color.White
+                            },
+                        )
+                    }
                     else -> Unit
                 }
             }
@@ -415,6 +442,7 @@ fun CaptureScreen(
                     }
                 }
                 if (phase == CapturePhase.Idle) {
+                    MetronomeControl(contentColor = Color.White)
                     OutlinedTextField(
                         value = speedText,
                         onValueChange = { speedText = it.filter { c -> c.isDigit() || c == '.' || c == ',' }.take(4) },
@@ -450,6 +478,31 @@ fun CaptureScreen(
                     Box(Modifier.size(width = 96.dp, height = 1.dp))
                 }
             }
+        }
+    }
+}
+
+/**
+ * The live pose drawn over the camera preview, which shows the frame fitted to the screen. Points are
+ * mirrored for the front camera, whose preview is a mirror image while the analysis frames aren't.
+ */
+@Composable
+private fun LiveSkeleton(preview: LivePreview, mirrored: Boolean, modifier: Modifier) {
+    val pose = preview.pose ?: return
+    Canvas(modifier) {
+        val aspect = preview.frameWidth.toFloat() / preview.frameHeight.coerceAtLeast(1)
+        val fitWidth = if (size.width / size.height > aspect) size.height * aspect else size.width
+        val fitHeight = fitWidth / aspect
+        val left = (size.width - fitWidth) / 2
+        val top = (size.height - fitHeight) / 2
+        fun point(i: Int): Offset {
+            val x = if (mirrored) 1 - pose.x[i] else pose.x[i]
+            return Offset(left + x * fitWidth, top + pose.y[i] * fitHeight)
+        }
+        val stroke = 3.dp.toPx()
+        val color = Color.White.copy(alpha = 0.8f)
+        (Landmark.LEFT_CONNECTIONS + Landmark.RIGHT_CONNECTIONS + Landmark.CENTER_CONNECTIONS).forEach { (a, b) ->
+            if (pose.visibility[a] >= 0.5f && pose.visibility[b] >= 0.5f) drawLine(color, point(a), point(b), stroke, StrokeCap.Round)
         }
     }
 }

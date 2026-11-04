@@ -15,6 +15,8 @@ data class Feedback(
     val drill: String? = null,
     /** Where the measurement sits against the good range, for drawing as a bar. */
     val scale: Scale? = null,
+    /** A step rate to practise with the metronome, when cadence needs work. */
+    val metronomeSpm: Int? = null,
 )
 
 /** A measured [value] on a bar from [min] to [max], where [goodLow]..[goodHigh] is the good range. */
@@ -97,7 +99,8 @@ object Coach {
             "Raising your step rate by 5–8%, to about $target steps/min, usually shortens each stride " +
                 "and reduces overstriding.$history",
             cue = "Quick, light steps.",
-            drill = "Alternate 1 minute with a metronome app set to $target bpm and 1 minute at your normal rhythm.",
+            drill = "Alternate 1 minute with the metronome at $target and 1 minute at your normal rhythm.",
+            metronomeSpm = target,
         )
     }
 

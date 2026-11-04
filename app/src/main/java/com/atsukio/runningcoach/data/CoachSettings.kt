@@ -26,8 +26,16 @@ class CoachSettings(context: Context) {
         get() = prefs.getInt(KEY_RECORD_SECONDS, DEFAULT_RECORD_SECONDS).takeIf { it in RECORD_OPTIONS } ?: DEFAULT_RECORD_SECONDS
         set(value) = prefs.edit { putInt(KEY_RECORD_SECONDS, value) }
 
+    /** The metronome's step rate. */
+    var metronomeSpm: Int
+        get() = prefs.getInt(KEY_METRONOME, DEFAULT_METRONOME_SPM).coerceIn(METRONOME_RANGE)
+        set(value) = prefs.edit { putInt(KEY_METRONOME, value.coerceIn(METRONOME_RANGE)) }
+
     companion object {
         val RECORD_OPTIONS = listOf(10, 15, 20, 30)
+        val METRONOME_RANGE = 140..210
+        private const val DEFAULT_METRONOME_SPM = 170
+        private const val KEY_METRONOME = "metronome_spm"
         private const val DEFAULT_RECORD_SECONDS = 15
         private const val KEY_LIVE = "live_analysis"
         private const val KEY_RECORD_SECONDS = "record_seconds"
