@@ -83,7 +83,8 @@ import java.io.File
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-private class ResultData(val session: Session, val pose: PoseTrack?, val previous: GaitMetrics?)
+/** [pose] is cleaned for display and analysis; [rawPose] is exactly what the detector found. */
+private class ResultData(val session: Session, val pose: PoseTrack?, val rawPose: PoseTrack?, val previous: GaitMetrics?)
 
 private val GoodColor = Color(0xFF2E7D32)
 private val ImproveColor = Color(0xFFEF6C00)
@@ -104,7 +105,8 @@ fun ResultScreen(id: String, onBack: () -> Unit) {
         val loaded = withContext(Dispatchers.IO) {
             val session = repo.get(id) ?: return@withContext null
             val previous = repo.list().firstOrNull { it.createdAt < session.createdAt && it.metrics != null }
-            ResultData(session, repo.loadPose(id)?.let(PoseCleaner::clean), previous?.metrics)
+            val raw = repo.loadPose(id)
+            ResultData(session, raw?.let(PoseCleaner::clean), raw, previous?.metrics)
         }
         data = loaded
         notFound = loaded == null
@@ -177,6 +179,7 @@ private fun ResultContent(data: ResultData, video: File, padding: PaddingValues)
                 aspectRatio = session.videoWidth.toFloat() / session.videoHeight.coerceAtLeast(1),
                 playbackFps = session.playbackFps,
                 pose = data.pose,
+                rawPose = data.rawPose,
                 contactFrames = metrics?.contactFrames.orEmpty(),
             )
         }
@@ -316,6 +319,7 @@ private fun VideoReplay(
     aspectRatio: Float,
     playbackFps: Float,
     pose: PoseTrack?,
+    rawPose: PoseTrack?,
     contactFrames: List<Int>,
 ) {
     val context = LocalContext.current
@@ -333,6 +337,7 @@ private fun VideoReplay(
     var speed by remember { mutableFloatStateOf(0.5f) }
     var playing by remember { mutableStateOf(true) }
     var showSkeleton by remember { mutableStateOf(true) }
+    var showRaw by remember { mutableStateOf(false) }
     var positionMs by remember { mutableLongStateOf(0L) }
     LaunchedEffect(speed) { player.setPlaybackSpeed(speed) }
     LaunchedEffect(playing) { player.playWhenReady = playing }
@@ -355,7 +360,7 @@ private fun VideoReplay(
                 )
                 if (showSkeleton && pose != null) {
                     val frame = frameAt(positionMs, playbackFps)
-                    SkeletonOverlay(pose, frame, contactFrames, playbackFps, Modifier.fillMaxSize())
+                    SkeletonOverlay(if (showRaw && rawPose != null) rawPose else pose, frame, contactFrames, playbackFps, Modifier.fillMaxSize())
                 }
             }
         }
@@ -384,6 +389,10 @@ private fun VideoReplay(
             }
             OutlinedButton(onClick = { step(-1) }) { Text("‹ Frame") }
             OutlinedButton(onClick = { step(1) }) { Text("Frame ›") }
+            if (rawPose != null) {
+                // Shows exactly what the detector found, before swaps, jumps and jitter are cleaned up.
+                FilterChip(selected = showRaw, onClick = { showRaw = !showRaw }, label = { Text("Raw") })
+            }
             Spacer(Modifier.weight(1f))
             Text(
                 "Frame $frame · %.2f s".format(positionMs / 1000.0),
