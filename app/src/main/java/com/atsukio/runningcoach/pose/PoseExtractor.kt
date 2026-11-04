@@ -2,8 +2,9 @@ package com.atsukio.runningcoach.pose
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.Matrix
 import android.media.MediaMetadataRetriever
+import android.os.SystemClock
+import android.util.Log
 import com.atsukio.runningcoach.analysis.FramePose
 import com.atsukio.runningcoach.analysis.Landmark
 import com.atsukio.runningcoach.analysis.PoseTrack
@@ -12,13 +13,17 @@ import com.google.mediapipe.tasks.core.BaseOptions
 import com.google.mediapipe.tasks.core.Delegate
 import com.google.mediapipe.tasks.vision.core.RunningMode
 import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarker
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.Executors
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.roundToInt
 
 /** Frame rate and upright size of a video file. */
 class VideoInfo(
@@ -30,9 +35,23 @@ class VideoInfo(
     val captureFps: Float,
     internal val rotation: Int,
     internal val indexed: Boolean,
-)
+    internal val durationMs: Long,
+    internal val slowMotionFps: Float?,
+) {
+    /** The same video once every frame has been decoded and counted. */
+    internal fun withFrameCount(count: Int): VideoInfo {
+        val fps = count * 1000f / durationMs
+        return VideoInfo(width, height, count, fps, captureFps(fps, slowMotionFps), rotation, indexed, durationMs, slowMotionFps)
+    }
+}
 
-/** Runs MediaPipe pose detection on every frame of a video, entirely on the device. */
+private fun captureFps(playbackFps: Float, slowMotionFps: Float?) =
+    slowMotionFps?.takeIf { it > playbackFps * 1.5f } ?: playbackFps
+
+/**
+ * Runs MediaPipe pose detection on every frame of a video, entirely on the device. Frames are decoded
+ * on one thread while the previous frames are being detected on another.
+ */
 class PoseExtractor(private val context: Context) {
 
     suspend fun extract(
@@ -43,38 +62,71 @@ class PoseExtractor(private val context: Context) {
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(video.path)
-            val info = readInfo(retriever)
+            var info = readInfo(retriever)
             onInfo(info)
-            val batchSize = if (info.width * info.height > 2_500_000) 2 else 6
-            val frames = ArrayList<FramePose?>(info.frameCount)
-            Landmarker(context).use { landmarker ->
-                var index = 0
-                while (index < info.frameCount) {
-                    ensureActive()
-                    val count = min(batchSize, info.frameCount - index)
-                    // Frame counts in metadata can overshoot slightly; stop at the last readable frame.
-                    val bitmaps = runCatching { fetch(retriever, info, index, count) }.getOrNull()
-                    if (bitmaps.isNullOrEmpty()) break
-                    for ((i, bitmap) in bitmaps.withIndex()) {
-                        val input = prepare(bitmap, info)
-                        val timestampMs = ((index + i) * 1000.0 / info.playbackFps).toLong()
-                        frames += landmarker.detect(input, timestampMs)
-                        if (input !== bitmap) input.recycle()
-                        bitmap.recycle()
-                    }
-                    index += bitmaps.size
-                    onProgress(index.toFloat() / info.frameCount)
-                }
+            val started = SystemClock.elapsedRealtime()
+            val fast = try {
+                detectAll(CodecFrameSource(video, info.rotation, MAX_INPUT_SIDE), info, onProgress)
+                    .takeIf { it.frames.isNotEmpty() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Fast decoding failed, using the slower frame-by-frame path", e)
+                null
             }
-            PoseTrack(info.captureFps, info.width, info.height, frames)
+            val result = fast ?: detectAll(RetrieverFrameSource(retriever, info, MAX_INPUT_SIDE), info, onProgress)
+            if (fast != null && !info.indexed) {
+                // Without a frame count the estimate assumed 30 fps; now we know the real number.
+                info = info.withFrameCount(result.frames.size)
+                onInfo(info)
+            }
+            val seconds = (SystemClock.elapsedRealtime() - started) / 1000f
+            Log.i(
+                TAG,
+                "Analysed ${result.frames.size} frames in %.1f s (%.0f fps) using ${result.source} and the ${if (result.gpu) "GPU" else "CPU"}"
+                    .format(seconds, result.frames.size / max(seconds, 0.001f)),
+            )
+            PoseTrack(info.captureFps, info.width, info.height, result.frames)
         } finally {
             retriever.release()
         }
     }
 
+    private class Detected(val frames: List<FramePose?>, val source: String, val gpu: Boolean)
+
+    private suspend fun detectAll(source: FrameSource, info: VideoInfo, onProgress: (Float) -> Unit): Detected =
+        coroutineScope {
+            val decoded = Channel<DecodedFrame>(BUFFERED_FRAMES)
+            launch {
+                try {
+                    source.frames { decoded.send(it) }
+                } finally {
+                    decoded.close()
+                }
+            }
+            // MediaPipe always runs on the same single thread.
+            Executors.newSingleThreadExecutor().asCoroutineDispatcher().use { detectThread ->
+                withContext(detectThread) {
+                    Landmarker(context).use { landmarker ->
+                        val frames = ArrayList<FramePose?>(info.frameCount)
+                        var lastMs = -1L
+                        for (frame in decoded) {
+                            // Video mode needs strictly increasing timestamps.
+                            val timestampMs = max(frame.timestampMs, lastMs + 1)
+                            lastMs = timestampMs
+                            frames += landmarker.detect(frame.bitmap, timestampMs)
+                            frame.bitmap.recycle()
+                            onProgress(min(1f, frames.size.toFloat() / info.frameCount))
+                        }
+                        Detected(frames, source.name, landmarker.usingGpu)
+                    }
+                }
+            }
+        }
+
     private fun readInfo(r: MediaMetadataRetriever): VideoInfo {
         fun meta(key: Int) = r.extractMetadata(key)
-        val durationMs = meta(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+        val durationMs = meta(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()?.takeIf { it > 0 }
             ?: error("Couldn't read the video's length.")
         val rotation = meta(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
         val rawWidth = meta(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
@@ -85,63 +137,33 @@ class PoseExtractor(private val context: Context) {
         val playbackFps = if (indexed) metaCount!! * 1000f / durationMs else FALLBACK_FPS
         val frameCount = if (indexed) metaCount!! else (durationMs * FALLBACK_FPS / 1000).toInt()
         // Slow-motion files record their true capture rate separately.
-        val captureFps = meta(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)?.toFloatOrNull()
-            ?.takeIf { it > playbackFps * 1.5f } ?: playbackFps
+        val slowMotionFps = meta(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)?.toFloatOrNull()
         return VideoInfo(
             width = if (sideways) rawHeight else rawWidth,
             height = if (sideways) rawWidth else rawHeight,
             frameCount = frameCount,
             playbackFps = playbackFps,
-            captureFps = captureFps,
+            captureFps = captureFps(playbackFps, slowMotionFps),
             rotation = rotation,
             indexed = indexed,
+            durationMs = durationMs,
+            slowMotionFps = slowMotionFps,
         )
     }
 
-    private fun fetch(r: MediaMetadataRetriever, info: VideoInfo, start: Int, count: Int): List<Bitmap> {
-        if (info.indexed) {
-            val params = MediaMetadataRetriever.BitmapParams().apply { preferredConfig = Bitmap.Config.ARGB_8888 }
-            return r.getFramesAtIndex(start, count, params)
-        }
-        return (start until start + count).mapNotNull { i ->
-            val timeUs = (i * 1_000_000L / FALLBACK_FPS).toLong()
-            r.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST)
-        }
-    }
-
-    /** Makes the frame upright and small enough for fast detection; the model works at 256 px anyway. */
-    private fun prepare(bitmap: Bitmap, info: VideoInfo): Bitmap {
-        var frame = bitmap
-        val needsRotation = info.rotation != 0 && frame.width != info.width && frame.width == info.height
-        if (needsRotation) {
-            val matrix = Matrix().apply { postRotate(info.rotation.toFloat()) }
-            frame = Bitmap.createBitmap(frame, 0, 0, frame.width, frame.height, matrix, true)
-        }
-        val scale = MAX_INPUT_SIDE.toFloat() / max(frame.width, frame.height)
-        if (scale < 1f) {
-            val scaled = Bitmap.createScaledBitmap(
-                frame, (frame.width * scale).roundToInt(), (frame.height * scale).roundToInt(), true,
-            )
-            if (frame !== bitmap) frame.recycle()
-            frame = scaled
-        }
-        if (frame.config != Bitmap.Config.ARGB_8888) {
-            val converted = frame.copy(Bitmap.Config.ARGB_8888, false)
-            if (frame !== bitmap) frame.recycle()
-            frame = converted
-        }
-        return frame
-    }
-
     private companion object {
+        const val TAG = "PoseExtractor"
         const val FALLBACK_FPS = 30f
         const val MAX_INPUT_SIDE = 960
+        const val BUFFERED_FRAMES = 4
     }
 }
 
 /** Wraps PoseLandmarker, falling back from GPU to CPU on devices where the GPU delegate fails. */
 private class Landmarker(private val context: Context) : AutoCloseable {
-    private var usingGpu = true
+    var usingGpu = true
+        private set
+
     private var landmarker: PoseLandmarker = try {
         create(Delegate.GPU)
     } catch (e: Exception) {

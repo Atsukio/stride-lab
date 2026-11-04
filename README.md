@@ -9,7 +9,8 @@ Everything runs on the phone: there is no internet permission, no cloud service,
    The app asks for 60 fps where the camera supports it. A Bluetooth camera remote (volume, Enter or
    play/pause key) starts the countdown, cancels it, or stops recording. No Bluetooth permission is needed.
 2. **Pose detection.** [MediaPipe Pose Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker)
-   (full model, bundled in the APK) finds 33 body landmarks in every frame.
+   (full model, bundled in the APK) finds 33 body landmarks in every frame. The video is decoded in one pass by the
+   hardware decoder while earlier frames are still being analysed; files it can't handle fall back to a slower path.
 3. **Gait analysis** (`analysis/GaitAnalyzer.kt`) finds each foot landing and measures:
    cadence, overstride (ankle ahead of hips at landing), shin angle at landing, knee bend at landing and during stance,
    vertical bounce, trunk lean, elbow angle, and the left/right difference in landing distance.
