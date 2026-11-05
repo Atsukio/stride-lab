@@ -1,6 +1,17 @@
 package com.atsukio.runningcoach.ui
 
 import android.net.Uri
+import android.widget.Toast
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.Checkbox
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.semantics.Role
+import com.atsukio.runningcoach.share.ResultSharer
+import kotlinx.coroutines.launch
 import androidx.annotation.OptIn
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -101,6 +112,11 @@ fun ResultScreen(id: String, onBack: () -> Unit, onReanalyse: () -> Unit) {
     var data by remember { mutableStateOf<ResultData?>(null) }
     var notFound by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var shareOpen by remember { mutableStateOf(false) }
+    var sharing by remember { mutableStateOf(false) }
+    // -1 until the person steps through landings: then the middle one shows.
+    var landingIndex by rememberSaveable { mutableIntStateOf(-1) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(id) {
         val loaded = withContext(Dispatchers.IO) {
@@ -123,6 +139,11 @@ fun ResultScreen(id: String, onBack: () -> Unit, onReanalyse: () -> Unit) {
                     }
                 },
                 actions = {
+                    if (data?.session?.metrics != null) {
+                        IconButton(onClick = { shareOpen = true }) {
+                            Icon(Icons.Default.Share, contentDescription = "Share results")
+                        }
+                    }
                     if (data != null) {
                         // Runs the clip again with the current version and settings, keeping its date.
                         IconButton(onClick = onReanalyse) {
@@ -138,7 +159,13 @@ fun ResultScreen(id: String, onBack: () -> Unit, onReanalyse: () -> Unit) {
     ) { padding ->
         val result = data
         when {
-            result != null -> ResultContent(result, repo.videoFile(id), PaddingValues(top = padding.calculateTopPadding()))
+            result != null -> ResultContent(
+                result,
+                repo.videoFile(id),
+                PaddingValues(top = padding.calculateTopPadding()),
+                landingIndex = shownLanding(result, landingIndex),
+                onLandingIndex = { landingIndex = it },
+            )
             notFound -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Text("This session no longer exists.")
             }
@@ -146,6 +173,38 @@ fun ResultScreen(id: String, onBack: () -> Unit, onReanalyse: () -> Unit) {
                 CircularProgressIndicator()
             }
         }
+    }
+
+    val shareData = data
+    if (shareOpen && shareData != null) {
+        val video = repo.videoFile(id)
+        val landing = shownLanding(shareData, landingIndex)
+        ShareDialog(
+            landingNumber = landing.takeIf { shareData.session.metrics?.contactFrames?.isNotEmpty() == true }?.plus(1),
+            videoMb = video.length() / 1_048_576.0,
+            busy = sharing,
+            onDismiss = { if (!sharing) shareOpen = false },
+            onShare = { withLanding, withVideo ->
+                sharing = true
+                scope.launch {
+                    val session = shareData.session
+                    val result = withContext(Dispatchers.IO) {
+                        runCatching {
+                            val feedback = Coach.review(session.metrics!!, session.speedKmh, shareData.previous)
+                            ResultSharer.prepare(
+                                context, session, feedback, shareData.pose, video,
+                                ResultSharer.Options(landing.takeIf { withLanding }, withVideo),
+                            )
+                        }
+                    }
+                    sharing = false
+                    shareOpen = false
+                    result
+                        .onSuccess { context.startActivity(it) }
+                        .onFailure { Toast.makeText(context, "Couldn't prepare the share: ${it.message}", Toast.LENGTH_LONG).show() }
+                }
+            },
+        )
     }
 
     if (confirmDelete) {
@@ -165,8 +224,80 @@ fun ResultScreen(id: String, onBack: () -> Unit, onReanalyse: () -> Unit) {
     }
 }
 
+/** The landing showing on the landing card: the one picked, or the middle one. */
+private fun shownLanding(data: ResultData, picked: Int): Int {
+    val count = data.session.metrics?.contactFrames?.size ?: 0
+    return if (picked in 0 until count) picked else count / 2
+}
+
+/** Choose what to send with the summary image, then open the share sheet. */
 @Composable
-private fun ResultContent(data: ResultData, video: File, padding: PaddingValues) {
+private fun ShareDialog(
+    landingNumber: Int?,
+    videoMb: Double,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onShare: (withLanding: Boolean, withVideo: Boolean) -> Unit,
+) {
+    var withLanding by rememberSaveable { mutableStateOf(landingNumber != null) }
+    var withVideo by rememberSaveable { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Share your results") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Sends a summary image of your measurements, with a text version for apps that show one.")
+                if (landingNumber != null) {
+                    ShareOption(
+                        "A landing from the video",
+                        "Landing $landingNumber, the one on the landing card, with its measurements drawn on",
+                        withLanding,
+                        enabled = !busy,
+                    ) { withLanding = it }
+                }
+                ShareOption("The video clip", "%.0f MB".format(videoMb.coerceAtLeast(1.0)), withVideo, enabled = !busy) { withVideo = it }
+                Text(
+                    "You pick the app it goes to. Stride Lab itself never uploads anything.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onShare(withLanding && landingNumber != null, withVideo) }, enabled = !busy) {
+                if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Share")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun ShareOption(title: String, detail: String, checked: Boolean, enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .toggleable(value = checked, enabled = enabled, role = Role.Checkbox, onValueChange = onChange)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(checked = checked, onCheckedChange = null, enabled = enabled)
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun ResultContent(
+    data: ResultData,
+    video: File,
+    padding: PaddingValues,
+    landingIndex: Int,
+    onLandingIndex: (Int) -> Unit,
+) {
     val session = data.session
     val metrics = session.metrics
     val feedback = remember(session) {
@@ -197,6 +328,8 @@ private fun ResultContent(data: ResultData, video: File, padding: PaddingValues)
                     metrics = metrics,
                     aspectRatio = session.videoWidth.toFloat() / session.videoHeight.coerceAtLeast(1),
                     playbackFps = session.playbackFps,
+                    index = landingIndex,
+                    onIndex = onLandingIndex,
                 )
             }
         }

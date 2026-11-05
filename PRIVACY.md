@@ -1,6 +1,6 @@
 # Stride Lab privacy policy
 
-Effective 4 November 2026.
+Effective 5 November 2026.
 
 Stride Lab analyses your running form on your phone. **It has no internet access**: the app doesn't request
 Android's internet permission, so nothing you record can leave your phone through the app. There are no
@@ -18,6 +18,14 @@ All of this is kept in the app's private storage on your phone. Other apps can't
 
 The app turns off Android's cloud backup and device-to-device transfer for its data, so none of it is copied to
 Google Drive or to a new phone.
+
+## Sharing
+
+Nothing is shared unless you choose to. **Share** on a result makes a summary image of your measurements and,
+if you tick them, a still from your video and the clip itself. It then opens Android's share sheet, and you pick
+the app that receives them, such as a messaging or email app. From then on that app's own privacy policy applies.
+Only the app you pick can read the shared files. A copy stays in the app's private cache until your next share,
+or until Android clears the cache.
 
 ## Deleting your data
 

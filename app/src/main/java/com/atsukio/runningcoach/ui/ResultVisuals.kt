@@ -28,10 +28,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,10 +42,12 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -101,7 +101,7 @@ fun RangeBar(scale: Scale, markerColor: Color, goodColor: Color) {
     }
 }
 
-private fun goodRangeText(scale: Scale): String {
+internal fun goodRangeText(scale: Scale): String {
     fun n(v: Double) = v.roundToInt().toString()
     val unit = if (scale.unit.startsWith("°")) scale.unit else " ${scale.unit}"
     return when {
@@ -113,16 +113,23 @@ private fun goodRangeText(scale: Scale): String {
 
 /**
  * A still of one foot landing with the measurements drawn on it: how far ahead of the hips the foot
- * lands, the shin angle, the knee bend and the lean. Steps through every landing in the clip.
+ * lands, the shin angle, the knee bend and the lean. Steps through every landing in the clip;
+ * [index] is the one showing, held by the caller so sharing can use the same landing.
  */
 @Composable
-fun LandingCard(video: File, track: PoseTrack, metrics: GaitMetrics, aspectRatio: Float, playbackFps: Float) {
+fun LandingCard(
+    video: File,
+    track: PoseTrack,
+    metrics: GaitMetrics,
+    aspectRatio: Float,
+    playbackFps: Float,
+    index: Int,
+    onIndex: (Int) -> Unit,
+) {
     val contacts = metrics.contactFrames
     if (contacts.isEmpty()) return
-    var index by rememberSaveable { mutableIntStateOf(contacts.size / 2) }
     val frame = contacts[index.coerceIn(contacts.indices)]
-    val legCm = metrics.overstrideCm?.let { cm -> metrics.overstrideLegRatio?.takeIf { abs(it) > 1e-6 }?.let { cm / it } }
-    val annotation = remember(frame) { LandingAnnotation.at(track, frame, legCm) }
+    val annotation = remember(frame) { landingAnnotation(track, metrics, frame) }
     var image by remember { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(frame) {
         image = null
@@ -152,11 +159,11 @@ fun LandingCard(video: File, track: PoseTrack, metrics: GaitMetrics, aspectRatio
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { index-- }, enabled = index > 0) { Text("‹ Previous") }
+                TextButton(onClick = { onIndex(index - 1) }, enabled = index > 0) { Text("‹ Previous") }
                 Spacer(Modifier.weight(1f))
                 Text("Landing ${index + 1} of ${contacts.size}", style = MaterialTheme.typography.labelLarge)
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = { index++ }, enabled = index < contacts.lastIndex) { Text("Next ›") }
+                TextButton(onClick = { onIndex(index + 1) }, enabled = index < contacts.lastIndex) { Text("Next ›") }
             }
             annotation?.let { a ->
                 a.overstrideCm?.let {
@@ -179,6 +186,12 @@ fun LandingCard(video: File, track: PoseTrack, metrics: GaitMetrics, aspectRatio
     }
 }
 
+/** The annotation for landing [frame], with distances in cm when the leg length is known. */
+internal fun landingAnnotation(track: PoseTrack, metrics: GaitMetrics, frame: Int): LandingAnnotation? {
+    val legCm = metrics.overstrideCm?.let { cm -> metrics.overstrideLegRatio?.takeIf { abs(it) > 1e-6 }?.let { cm / it } }
+    return LandingAnnotation.at(track, frame, legCm)
+}
+
 private fun describe(a: LandingAnnotation) = listOfNotNull(
     a.overstrideCm?.let { "Foot ${it.roundToInt()} centimetres ahead of hips" },
     "shin ${abs(a.shinDeg).roundToInt()} degrees",
@@ -198,8 +211,22 @@ private fun Legend(color: Color, text: String) {
 @Composable
 private fun LandingOverlay(a: LandingAnnotation, modifier: Modifier) {
     val measurer = rememberTextMeasurer()
-    Canvas(modifier) {
-        fun p(point: com.atsukio.runningcoach.analysis.Point) = Offset(point.x * size.width, point.y * size.height)
+    Canvas(modifier) { drawLanding(a, measurer, Offset.Zero, size) }
+}
+
+/**
+ * Draws [text] at [topLeft] at its natural size. Compose's own drawText fits text into the space left
+ * between [topLeft] and the canvas edge, and throws when that space is negative, so a label placed
+ * just off the edge (a foot near the bottom of the frame) would crash instead of being clipped.
+ */
+internal fun DrawScope.drawLabel(measurer: TextMeasurer, text: String, topLeft: Offset, style: TextStyle) =
+    drawText(measurer.measure(text, style), topLeft = topLeft)
+
+/** The landing measurements drawn over a video frame that fills [frameSize] at [origin]. */
+internal fun DrawScope.drawLanding(a: LandingAnnotation, measurer: TextMeasurer, origin: Offset, frameSize: Size) {
+    run {
+        fun p(point: com.atsukio.runningcoach.analysis.Point) =
+            Offset(origin.x + point.x * frameSize.width, origin.y + point.y * frameSize.height)
         val shoulder = p(a.shoulder)
         val hip = p(a.hip)
         val knee = p(a.knee)
@@ -223,21 +250,24 @@ private fun LandingOverlay(a: LandingAnnotation, modifier: Modifier) {
             drawLine(OverstrideColor, hip, ground, thin, pathEffect = dashes)
             drawLine(OverstrideColor, ground, ankle, thick, StrokeCap.Round)
             val text = if (cm > 0) "${cm.roundToInt()} cm" else "under hips"
-            drawText(measurer, text, Offset((ground.x + ankle.x) / 2 - 20.dp.toPx(), ankle.y + 8.dp.toPx()), label)
+            drawLabel(measurer, text, Offset((ground.x + ankle.x) / 2 - 20.dp.toPx(), ankle.y + 8.dp.toPx()), label)
         }
 
         // Shin: against a vertical line through the ankle.
         drawLine(ShinColor.copy(alpha = 0.7f), ankle, Offset(ankle.x, knee.y), thin, pathEffect = dashes)
-        drawText(measurer, "${abs(a.shinDeg).roundToInt()}°", Offset(knee.x + 10.dp.toPx(), (knee.y + ankle.y) / 2), label)
+        drawLabel(measurer, "${abs(a.shinDeg).roundToInt()}°", Offset(knee.x + 10.dp.toPx(), (knee.y + ankle.y) / 2), label)
 
         // Knee bend.
         drawCircle(KneeColor, radius = 7.dp.toPx(), center = knee, style = Stroke(thin))
-        drawText(measurer, "${a.kneeFlexionDeg.roundToInt()}°", Offset(knee.x + 12.dp.toPx(), knee.y - 22.dp.toPx()), label.copy(color = KneeColor))
+        drawLabel(measurer, "${a.kneeFlexionDeg.roundToInt()}°", Offset(knee.x + 12.dp.toPx(), knee.y - 22.dp.toPx()), label.copy(color = KneeColor))
     }
 }
 
-/** The video frame at [seconds], upright and at most 720 px on its long side. */
-private fun videoFrame(video: File, seconds: Double, aspectRatio: Float): ImageBitmap? = runCatching {
+private fun videoFrame(video: File, seconds: Double, aspectRatio: Float): ImageBitmap? =
+    videoFrameBitmap(video, seconds, aspectRatio)?.asImageBitmap()
+
+/** The video frame at [seconds], upright and at most [maxSide] px on its long side. */
+internal fun videoFrameBitmap(video: File, seconds: Double, aspectRatio: Float, maxSide: Int = 720): Bitmap? = runCatching {
     val retriever = MediaMetadataRetriever()
     try {
         retriever.setDataSource(video.path)
@@ -249,9 +279,9 @@ private fun videoFrame(video: File, seconds: Double, aspectRatio: Float): ImageB
         if (!looksUpright && rotation != 0) {
             frame = Bitmap.createBitmap(frame, 0, 0, frame.width, frame.height, Matrix().apply { postRotate(rotation.toFloat()) }, true)
         }
-        val scale = 720f / maxOf(frame.width, frame.height)
+        val scale = maxSide.toFloat() / maxOf(frame.width, frame.height)
         if (scale < 1f) frame = frame.scale((frame.width * scale).roundToInt(), (frame.height * scale).roundToInt())
-        frame.asImageBitmap()
+        frame
     } finally {
         retriever.release()
     }

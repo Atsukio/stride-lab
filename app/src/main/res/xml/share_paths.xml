@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Only the folder holding the latest share is reachable, and only by the app the person shares to. -->
+<paths>
+    <cache-path name="shared" path="shared/" />
+</paths>

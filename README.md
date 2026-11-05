@@ -39,6 +39,8 @@ Everything runs on the phone: there is no internet permission, no cloud service,
   (head or feet cut off, facing the camera, too small, off-centre, too dark).
 - **Metronome** at a chosen step rate, on the camera and run screens; the cadence card can set it to your target.
 - **Progress:** every measurement charted across your clips against its good range.
+- **Share results** from the results screen: a summary image of every measurement, optionally with an annotated
+  landing still and the clip, sent through Android's share sheet to the app you choose. The app itself never uploads.
 
 ## Watch and sensors
 
@@ -91,6 +93,7 @@ app/src/main/java/com/atsukio/runningcoach/
   analysis/   Pure Kotlin: pose track, gait metrics, coaching rules (unit-tested)
   pose/       MediaPipe frame-by-frame pose extraction
   data/       Session storage in app-private files, settings
+  share/      Summary image and text for sharing a result
   ui/         Compose screens: home, capture, analysis progress, results
 ```
 

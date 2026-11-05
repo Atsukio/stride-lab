@@ -32,7 +32,6 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalDensity
@@ -141,7 +140,7 @@ private fun SetupDiagram(modifier: Modifier) {
         val arrowEnd = planW * 0.62f
         drawLine(ink, Offset(planW * 0.30f, arrowY), Offset(arrowEnd, arrowY), d(2f))
         drawPath(triangle(Offset(arrowEnd + d(8f), arrowY), Offset(arrowEnd - d(2f), arrowY - d(5f)), Offset(arrowEnd - d(2f), arrowY + d(5f))), ink)
-        drawText(measurer, "running direction", Offset(planW * 0.30f, arrowY - d(17f)), small)
+        drawLabel(measurer, "running direction", Offset(planW * 0.30f, arrowY - d(17f)), small)
 
         // The runner from above, facing the console: staggered feet, arms, shoulders across the belt, head and nose.
         val rx = planW * 0.45f
@@ -153,7 +152,7 @@ private fun SetupDiagram(modifier: Modifier) {
         drawRoundRect(shoulders, Offset(rx - d(6f), ry - d(17f)), Size(d(12f), d(34f)), CornerRadius(d(6f)))
         drawOval(ink, Offset(rx - d(5f), ry - d(7f)), Size(d(14f), d(14f)))
         drawPath(triangle(Offset(rx + d(19f), ry), Offset(rx + d(9f), ry - d(5f)), Offset(rx + d(9f), ry + d(5f))), ink)
-        drawText(measurer, "you", Offset(rx + d(30f), ry - d(8f)), small)
+        drawLabel(measurer, "you", Offset(rx + d(30f), ry - d(8f)), small)
 
         // The phone standing upright beside the treadmill, seen from above: a thin bar, lens towards the runner.
         val px = rx
@@ -171,14 +170,14 @@ private fun SetupDiagram(modifier: Modifier) {
         // Square-on to the treadmill.
         drawLine(accent, Offset(px - d(12f), edge), Offset(px - d(12f), edge + d(12f)), d(2f))
         drawLine(accent, Offset(px - d(12f), edge + d(12f)), Offset(px, edge + d(12f)), d(2f))
-        drawText(measurer, "aim at your side", Offset(px + d(6f), edge + d(6f)), small.copy(color = accent, background = background))
+        drawLabel(measurer, "aim at your side", Offset(px + d(6f), edge + d(6f)), small.copy(color = accent, background = background))
         // Distance, along the camera's line from the runner to the phone.
         val dx = px - d(44f)
         drawLine(ink, Offset(dx, ry), Offset(dx, py), d(1.5f))
         drawLine(ink, Offset(dx - d(5f), ry), Offset(dx + d(5f), ry), d(1.5f))
         drawLine(ink, Offset(dx - d(5f), py), Offset(dx + d(5f), py), d(1.5f))
-        drawText(measurer, "2–3 m", Offset(dx - d(40f), (edge + py) / 2), label)
-        drawText(measurer, "phone upright, hip height", Offset(px - d(52f), py + d(18f)), small.copy(color = accent))
+        drawLabel(measurer, "2–3 m", Offset(dx - d(40f), (edge + py) / 2), label)
+        drawLabel(measurer, "phone upright, hip height", Offset(px - d(52f), py + d(18f)), small.copy(color = accent))
 
         // ---- Inset: what the camera should see ----
         val ix0 = w * 0.72f
@@ -186,7 +185,7 @@ private fun SetupDiagram(modifier: Modifier) {
         val iy0 = h * 0.10f
         val iy1 = h * 0.90f
         drawRoundRect(ink, Offset(ix0, iy0), Size(ix1 - ix0, iy1 - iy0), CornerRadius(d(10f)), style = Stroke(d(2f)))
-        drawText(measurer, "camera's view", Offset(ix0 + d(2f), iy1 + d(4f)), small)
+        drawLabel(measurer, "camera's view", Offset(ix0 + d(2f), iy1 + d(4f)), small)
         val fl = ix0 + d(6f)
         val fr = ix1 - d(6f)
         val ft = iy0 + d(14f)
