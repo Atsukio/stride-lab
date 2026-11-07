@@ -78,7 +78,7 @@ fun AboutScreen(onBack: () -> Unit, onOpenStorage: () -> Unit) {
                 style = MaterialTheme.typography.bodySmall,
             )
             OutlinedButton(onClick = onOpenStorage, modifier = Modifier.fillMaxWidth()) {
-                Text("Storage and crash log")
+                Text("Storage, older results and crash log")
             }
             HorizontalDivider()
             Text("Open-source licences", style = MaterialTheme.typography.titleMedium)

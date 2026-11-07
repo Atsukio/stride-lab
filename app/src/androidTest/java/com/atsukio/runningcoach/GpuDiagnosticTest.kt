@@ -5,6 +5,8 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.atsukio.runningcoach.analysis.GaitAnalyzer
 import com.atsukio.runningcoach.analysis.GaitResult
 import com.atsukio.runningcoach.analysis.Landmark
+import com.atsukio.runningcoach.analysis.LandingAnnotation
+import com.atsukio.runningcoach.analysis.PoseCleaner
 import com.atsukio.runningcoach.analysis.PoseTrack
 import com.atsukio.runningcoach.pose.PoseExtractor
 import kotlinx.coroutines.runBlocking
@@ -33,13 +35,31 @@ class GpuDiagnosticTest {
             val track = PoseExtractor(context, useGpu = gpu).extract(video) { }.track
             tracks[name] = track
             out.appendLine("$name: ${track.frames.size} frames at ${track.fps} fps, ${(System.currentTimeMillis() - started) / 1000}s")
-            when (val r = GaitAnalyzer.analyze(track, runnerHeightCm = 170.0, beltSpeedKmh = 6.2)) {
+            when (val r = GaitAnalyzer.analyze(track, runnerHeightCm = 165.0, beltSpeedKmh = 5.0)) {
                 is GaitResult.Success -> {
                     val m = r.metrics
                     out.appendLine("  cadence=${m.cadenceSpm} steps=${m.stepCount} overstride=${m.overstrideCm} shin=${m.shinAngleDeg}")
                     out.appendLine("  kneeContact=${m.kneeFlexionAtContactDeg} kneePeak=${m.peakStanceKneeFlexionDeg} bounce=${m.verticalOscillationCm}")
-                    out.appendLine("  trunk=${m.trunkLeanDeg} elbow=${m.elbowAngleDeg} asym=${m.overstrideAsymmetryCm} scaled=${m.scaledFromTreadmill}")
+                    out.appendLine("  trunk=${m.trunkLeanDeg} elbow=${m.elbowAngleDeg} asym=${m.overstrideAsymmetryCm} height=${m.estimatedHeightCm}")
                     out.appendLine("  warnings=${r.warnings}")
+                    // Every landing, to see where left/right balance comes from.
+                    val legCm = m.overstrideCm?.let { cm -> m.overstrideLegRatio?.let { cm / it } }
+                    val cleaned = PoseCleaner.clean(track)
+                    out.appendLine("  #  frame  time    leg    ahead_cm  shin  knee  vis_ankle(L/R)  vis_heel(L/R)")
+                    m.contactFrames.forEachIndexed { i, f ->
+                        val a = LandingAnnotation.at(cleaned, f, legCm, m.contactTimes[i])
+                        val p = cleaned.frames[f]
+                        val raw = track.frames[f]
+                        val leg = if (p == null) "?" else if (p.y[Landmark.LEFT_HEEL] >= p.y[Landmark.RIGHT_HEEL]) "L" else "R"
+                        out.appendLine(
+                            "  %2d %5d %7.2f   %s  %8.1f %5.1f %5.1f      %.2f/%.2f      %.2f/%.2f".format(
+                                i, f, m.contactTimes[i], leg, a?.overstrideCm ?: Double.NaN, a?.shinDeg ?: Double.NaN,
+                                a?.kneeFlexionDeg ?: Double.NaN,
+                                raw?.visibility?.get(Landmark.LEFT_ANKLE) ?: 0f, raw?.visibility?.get(Landmark.RIGHT_ANKLE) ?: 0f,
+                                raw?.visibility?.get(Landmark.LEFT_HEEL) ?: 0f, raw?.visibility?.get(Landmark.RIGHT_HEEL) ?: 0f,
+                            ),
+                        )
+                    }
                 }
                 is GaitResult.Failure -> out.appendLine("  failed: ${r.reason}")
             }

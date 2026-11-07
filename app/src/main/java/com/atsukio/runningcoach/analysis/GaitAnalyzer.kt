@@ -3,6 +3,7 @@ package com.atsukio.runningcoach.analysis
 import kotlinx.serialization.Serializable
 import kotlin.math.abs
 import kotlin.math.atan2
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -26,6 +27,8 @@ data class GaitMetrics(
     val overstrideAsymmetryCm: Double?,
     val stepCount: Int,
     val contactFrames: List<Int>,
+    /** When each landing happened, in frames and between them, so a landing's figures don't jump with the frame rate. */
+    val contactTimes: List<Double> = emptyList(),
     /** Runner height worked out from the treadmill speed, when one was given. */
     val estimatedHeightCm: Double? = null,
     /** True when distances were scaled from the treadmill belt rather than the runner's height setting. */
@@ -125,41 +128,57 @@ object GaitAnalyzer {
         val beltCmPerPx = beltSpeedKmh?.let { beltScale(s, contacts, intervals, isRegular, dir, fps, it) }
         val cmPerPx = beltCmPerPx?.let { belt ->
             val height = legPx * belt / LEG_TO_HEIGHT
+            // Implied height grows in step with the speed typed, so a big gap almost always means the speed was
+            // wrong (a misread display, or a treadmill that runs slower than it shows), and the fitting speed is easy to work out.
+            val fittingSpeed = beltSpeedKmh * runnerHeightCm / height
+            val gap = abs(height - runnerHeightCm) / runnerHeightCm
             if (height in 120.0..220.0) {
                 estimatedHeight = height
-                if (abs(height - runnerHeightCm) / runnerHeightCm > 0.08) {
-                    warnings += "From the treadmill speed you look about ${height.roundToInt()} cm tall, but Settings " +
-                        "says ${runnerHeightCm.roundToInt()} cm. Distances use the treadmill measurement; check the " +
-                        "speed was right, or update your height in Settings."
+                if (gap > SPEED_MISMATCH) {
+                    warnings += speedMismatch(beltSpeedKmh, runnerHeightCm, fittingSpeed) +
+                        " Distances use the speed you entered until you change it."
+                } else if (gap > 0.08) {
+                    warnings += "From the treadmill speed you look about ${height.roundToInt()} cm tall, but your height is " +
+                        "${runnerHeightCm.roundToInt()} cm. Distances use the treadmill measurement; check the " +
+                        "speed was right, or your height."
                 }
                 belt
             } else {
-                warnings += "The treadmill speed doesn't match the video, so distances are based on your height " +
-                    "setting instead. Check the speed you entered."
+                warnings += speedMismatch(beltSpeedKmh, runnerHeightCm, fittingSpeed) +
+                    " Until then, distances are based on your height instead."
                 null
             }
         } ?: (LEG_TO_HEIGHT * runnerHeightCm / legPx)
 
         // Per-landing measurements. NaN keeps each list aligned with `contacts`.
-        val sides = contacts.map { landingSide(s, it) }
-        val overstride = contacts.mapIndexed { i, c ->
+        val sides = contacts.map { landingSide(s, it, dir) }
+        // A landing is found on a whole frame, but the foot crosses the landing line somewhere between two.
+        // At 30 fps the belt moves the foot ~6 cm per frame, so a small detection difference (GPU versus CPU)
+        // could flip the frame and shift every landing figure. Measuring at the interpolated moment avoids that.
+        val groundLevels = Side.entries.associateWith { side -> landingLevel(s, side, legPx) }
+        val times = contacts.mapIndexed { i, c ->
+            val side = sides[i]
+            val level = side?.let { groundLevels[it] }
+            if (side == null || level == null) c.toDouble() else landingTime(s.y(side.heel), c, level)
+        }
+        val overstride = times.mapIndexed { i, t ->
             val side = sides[i] ?: return@mapIndexed Double.NaN
-            val ankle = s.point(side.ankle, c)
-            val hip = s.hipMid(c)
+            val ankle = s.pointAt(side.ankle, t)
+            val hip = s.hipMidAt(t)
             if (ankle.isValid && hip.isValid) dir * (ankle.x - hip.x) else Double.NaN
         }
-        val shin = contacts.mapIndexed { i, c ->
+        val shin = times.mapIndexed { i, t ->
             val side = sides[i] ?: return@mapIndexed Double.NaN
-            val knee = s.point(side.knee, c)
-            val ankle = s.point(side.ankle, c)
+            val knee = s.pointAt(side.knee, t)
+            val ankle = s.pointAt(side.ankle, t)
             if (knee.isValid && ankle.isValid) {
                 Math.toDegrees(atan2(dir * (ankle.x - knee.x), ankle.y - knee.y))
             } else {
                 Double.NaN
             }
         }
-        val kneeAtContact = contacts.mapIndexed { i, c ->
-            sides[i]?.let { kneeFlexion(s, it, c) } ?: Double.NaN
+        val kneeAtContact = times.mapIndexed { i, t ->
+            sides[i]?.let { kneeFlexion(s, it, t) } ?: Double.NaN
         }
 
         val peakStanceKnee = intervals.indices.mapNotNull { i ->
@@ -167,7 +186,7 @@ object GaitAnalyzer {
             if (!isRegular(intervals[i])) return@mapNotNull null
             val start = contacts[i]
             val end = start + (0.5 * intervals[i]).roundToInt()
-            (start..end).map { kneeFlexion(s, side, it) }.filter { !it.isNaN() }.maxOrNull()
+            (start..end).map { kneeFlexion(s, side, it.toDouble()) }.filter { !it.isNaN() }.maxOrNull()
         }
 
         val bounce = intervals.indices.mapNotNull { i ->
@@ -214,6 +233,7 @@ object GaitAnalyzer {
             overstrideAsymmetryCm = asymmetry(overstride, intervals, isRegular)?.let { it * cmPerPx },
             stepCount = contacts.size,
             contactFrames = contacts,
+            contactTimes = times,
             estimatedHeightCm = estimatedHeight,
             scaledFromTreadmill = estimatedHeight != null,
         )
@@ -244,6 +264,17 @@ object GaitAnalyzer {
         return if (bestLength + 1 >= 6) contacts.subList(bestStart, bestStart + bestLength + 1) else contacts
     }
 
+    /** How far the height implied by the belt may be from the runner's own before the speed is called into question. */
+    internal const val SPEED_MISMATCH = 0.15
+
+    /** The speed that would make the belt agree with a runner of [heightCm], given one that implied [impliedCm]. */
+    fun fittingSpeedKmh(speedKmh: Double, heightCm: Double, impliedCm: Double): Double = speedKmh * heightCm / impliedCm
+
+    private fun speedMismatch(typedKmh: Double, heightCm: Double, fittingKmh: Double) =
+        "The treadmill speed entered (%.1f km/h) doesn't fit your height of %d cm: the video looks more like about %.1f km/h. "
+            .format(typedKmh, heightCm.roundToInt(), fittingKmh) +
+            "Check what the treadmill was set to, and change it under \"Scale for this clip\"."
+
     /** Thigh plus shin length, taken near the top of the range since 2D projection only shortens it. */
     private fun legLength(s: Signals): Double? = (0 until s.size).flatMap { f ->
         Side.entries.mapNotNull { side ->
@@ -271,7 +302,7 @@ object GaitAnalyzer {
         if (beltSpeedKmh < 3) return null
         val pxPerSecond = intervals.indices.mapNotNull { i ->
             if (!isRegular(intervals[i])) return@mapNotNull null
-            val side = landingSide(s, contacts[i]) ?: return@mapNotNull null
+            val side = landingSide(s, contacts[i], dir) ?: return@mapNotNull null
             // Skip the moment of impact and stop before the heel lifts.
             val start = contacts[i] + max(1, (0.1 * intervals[i]).roundToInt())
             val end = contacts[i] + (0.45 * intervals[i]).roundToInt()
@@ -355,7 +386,17 @@ object GaitAnalyzer {
         return merged
     }
 
-    private fun landingSide(s: Signals, frame: Int): Side? {
+    /**
+     * The landing foot is the front one. "Lowest heel" was used before, but at first contact the other foot is
+     * often still flat on the belt behind, pushing off, and was picked instead (about a third of the landings on
+     * a real clip, which made left/right balance meaningless). Falls back to the lower heel if an ankle is missing.
+     */
+    private fun landingSide(s: Signals, frame: Int, dir: Double): Side? {
+        val leftAnkle = s.point(Side.LEFT.ankle, frame).x
+        val rightAnkle = s.point(Side.RIGHT.ankle, frame).x
+        if (!leftAnkle.isNaN() && !rightAnkle.isNaN()) {
+            return if (dir * leftAnkle >= dir * rightAnkle) Side.LEFT else Side.RIGHT
+        }
         val left = s.point(Side.LEFT.heel, frame).y
         val right = s.point(Side.RIGHT.heel, frame).y
         return when {
@@ -365,11 +406,43 @@ object GaitAnalyzer {
         }
     }
 
-    private fun kneeFlexion(s: Signals, side: Side, frame: Int): Double {
-        if (frame >= s.size) return Double.NaN
-        val hip = s.point(side.hip, frame)
-        val knee = s.point(side.knee, frame)
-        val ankle = s.point(side.ankle, frame)
+    /** The heel height at which a foot counts as landed, as [detectContacts] sets it. */
+    private fun landingLevel(s: Signals, side: Side, legPx: Double): Double? =
+        s.y(side.heel).toList().percentile(0.95)?.let { it - 0.04 * legPx }
+
+    /**
+     * The moment, in frames, that the heel came down through [level]: between the frame before [frame] and
+     * [frame] itself. Falls back to [frame] when the heel track doesn't cross cleanly.
+     */
+    internal fun landingTime(heelY: DoubleArray, frame: Int, level: Double): Double {
+        val before = heelY.getOrNull(frame - 1) ?: return frame.toDouble()
+        val after = heelY.getOrNull(frame) ?: return frame.toDouble()
+        if (before.isNaN() || after.isNaN() || before >= level || after <= before) return frame.toDouble()
+        return (frame - 1) + ((level - before) / (after - before)).coerceIn(0.0, 1.0)
+    }
+
+    /** A landmark between two frames, worked out from the frames either side. */
+    private fun Signals.pointAt(landmark: Int, t: Double): Vec2 {
+        val first = floor(t).toInt().coerceIn(0, size - 1)
+        val second = (first + 1).coerceAtMost(size - 1)
+        val a = point(landmark, first)
+        val b = point(landmark, second)
+        val w = (t - first).coerceIn(0.0, 1.0)
+        return when {
+            a.isValid && b.isValid -> a * (1 - w) + b * w
+            // One neighbour is missing: use the nearer one only if it is there.
+            w < 0.5 -> a
+            else -> b
+        }
+    }
+
+    private fun Signals.hipMidAt(t: Double) = midpoint(pointAt(Landmark.LEFT_HIP, t), pointAt(Landmark.RIGHT_HIP, t))
+
+    private fun kneeFlexion(s: Signals, side: Side, t: Double): Double {
+        if (t > s.size - 1) return Double.NaN
+        val hip = s.pointAt(side.hip, t)
+        val knee = s.pointAt(side.knee, t)
+        val ankle = s.pointAt(side.ankle, t)
         if (!hip.isValid || !knee.isValid || !ankle.isValid) return Double.NaN
         return 180.0 - angleAt(knee, hip, ankle)
     }
@@ -394,6 +467,7 @@ object GaitAnalyzer {
         val even = run.filterIndexed { i, v -> i % 2 == 0 && !v.isNaN() }
         val odd = run.filterIndexed { i, v -> i % 2 == 1 && !v.isNaN() }
         if (even.size < 3 || odd.size < 3) return null
-        return abs(even.average() - odd.average())
+        // Medians, so one misread landing can't make a leg look far off.
+        return abs(even.median()!! - odd.median()!!)
     }
 }

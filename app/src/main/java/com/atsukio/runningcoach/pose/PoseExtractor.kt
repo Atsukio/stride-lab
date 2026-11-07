@@ -28,6 +28,9 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileInputStream
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
@@ -408,7 +411,7 @@ internal class Landmarker(private val context: Context, preferGpu: Boolean) : Au
 
     private fun create(delegate: Delegate): PoseLandmarker {
         val base = BaseOptions.builder()
-            .setModelAssetPath("pose_landmarker_full.task")
+            .setModelAssetBuffer(PoseModel.buffer(context))
             .setDelegate(delegate)
             .build()
         val options = PoseLandmarker.PoseLandmarkerOptions.builder()
@@ -421,5 +424,30 @@ internal class Landmarker(private val context: Context, preferGpu: Boolean) : Au
             .setMinPosePresenceConfidence(0.5f)
             .build()
         return PoseLandmarker.createFromOptions(context, options)
+    }
+}
+
+/**
+ * The pose model, mapped once per process straight from the APK, where it is stored uncompressed.
+ * Given a file path, MediaPipe copies the model into its cache folder each time a detector is created, and with
+ * several detectors starting at once one copy overwrote the file while another was reading it, crashing the app
+ * (SIGBUS on the Pixel 10 Pro). A buffer of our own avoids the shared file.
+ */
+internal object PoseModel {
+    private const val ASSET = "pose_landmarker_full.task"
+
+    @Volatile
+    private var mapped: ByteBuffer? = null
+
+    /** A view of the model for one detector; every view shares the same read-only memory. */
+    fun buffer(context: Context): ByteBuffer {
+        val model = mapped ?: synchronized(this) {
+            mapped ?: context.assets.openFd(ASSET).use { fd ->
+                FileInputStream(fd.fileDescriptor).channel.use { channel ->
+                    channel.map(FileChannel.MapMode.READ_ONLY, fd.startOffset, fd.declaredLength)
+                }
+            }.also { mapped = it }
+        }
+        return model.duplicate()
     }
 }

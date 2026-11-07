@@ -38,8 +38,9 @@ internal class SyntheticRunner(
         return pxPerSecond * cmPerPx / 100 * 3.6
     }
 
-    fun track(seconds: Double): PoseTrack {
-        val frames = (0 until (seconds * fps).toInt()).map { frame(it / fps.toDouble()) }
+    /** [phaseFrames] moves where the camera's frames fall in the runner's stride, as a different clip start would. */
+    fun track(seconds: Double, phaseFrames: Double = 0.0): PoseTrack {
+        val frames = (0 until (seconds * fps).toInt()).map { frame((it + phaseFrames) / fps.toDouble()) }
         return PoseTrack(fps, width, height, frames)
     }
 
@@ -118,6 +119,57 @@ class GaitAnalyzerTest {
     }
 
     @Test
+    fun landingFiguresDoNotJumpWithTheFramePhase() {
+        // A guard that where the frames fall in the stride doesn't change the figures. This synthetic foot is
+        // nearly still when it crosses the landing line, so it passes without interpolation too: the real check
+        // is GpuDiagnosticTest on a real clip.
+        val runner = SyntheticRunner(fps = 30f)
+        val results = listOf(0.0, 0.25, 0.5, 0.75).map {
+            metricsOf(GaitAnalyzer.analyze(runner.track(12.0, it), heightCm))
+        }
+        val overstride = results.map { it.overstrideCm!! }
+        val shin = results.map { it.shinAngleDeg!! }
+        assertTrue("overstride spread was $overstride", overstride.max() - overstride.min() < 1.5)
+        assertTrue("shin spread was $shin", shin.max() - shin.min() < 2.0)
+    }
+
+    @Test
+    fun aWrongTreadmillSpeedGetsTheSpeedThatFits() {
+        val runner = SyntheticRunner()
+        val actual = runner.beltSpeedKmh(heightCm)
+        // Typing 20% too fast, close to the 6.2 km/h entry for a treadmill really at 5 (24%), but keeping the
+        // implied height (about 210 cm) inside the range where the belt is still used.
+        val result = GaitAnalyzer.analyze(runner.track(12.0), heightCm, beltSpeedKmh = actual * 1.2) as GaitResult.Success
+        val warning = result.warnings.single { "doesn't fit your height" in it }
+        val suggested = Regex("""about ([\d.,]+) km/h""").find(warning)!!.groupValues[1].replace(',', '.').toDouble()
+        assertEquals(actual, suggested, 0.15)
+        assertEquals(heightCm * 1.2, result.metrics.estimatedHeightCm!!, 5.0)
+    }
+
+    @Test
+    fun aCloseSpeedGetsNoSpeedWarning() {
+        val runner = SyntheticRunner()
+        val result = GaitAnalyzer.analyze(runner.track(12.0), heightCm, beltSpeedKmh = runner.beltSpeedKmh(heightCm) * 1.05) as GaitResult.Success
+        assertTrue(result.warnings.none { "doesn't fit your height" in it })
+    }
+
+    @Test
+    fun fittingSpeedScalesWithTheHeightGap() {
+        // The Pixel clip: 6.2 km/h typed, 216 cm implied, runner 165 cm.
+        assertEquals(4.74, GaitAnalyzer.fittingSpeedKmh(6.2, 165.0, 216.0), 0.01)
+    }
+
+    @Test
+    fun landingTimeIsInterpolatedBetweenFrames() {
+        // Heel crosses the level of 100 a quarter of the way from frame 1 (y 80) to frame 2 (y 160)
+        val heel = doubleArrayOf(0.0, 80.0, 160.0)
+        assertEquals(1.25, GaitAnalyzer.landingTime(heel, 2, 100.0), 1e-9)
+        // No crossing between the frames: stays on the detected frame
+        assertEquals(2.0, GaitAnalyzer.landingTime(heel, 2, 70.0), 0.0)
+        assertEquals(0.0, GaitAnalyzer.landingTime(heel, 0, 100.0), 0.0)
+    }
+
+    @Test
     fun measuresKnownRunner() {
         val m = metricsOf(analyze(SyntheticRunner()))
         assertEquals(170.0, m.cadenceSpm!!, 2.0)
@@ -162,7 +214,10 @@ class GaitAnalyzerTest {
         assertTrue(m.scaledFromTreadmill)
         // Distances follow the true height, not the wrong 165 cm setting.
         assertEquals(60 * 0.49 * trueHeight / 400, m.overstrideCm!!, 2.0)
-        assertTrue((result as GaitResult.Success).warnings.any { "Settings" in it })
+        // 12% off: a gentle check, not the wrong-speed warning.
+        val warnings = (result as GaitResult.Success).warnings
+        assertTrue(warnings.any { "you look about" in it })
+        assertTrue(warnings.none { "doesn't fit your height" in it })
     }
 
     @Test
@@ -188,7 +243,7 @@ class GaitAnalyzerTest {
         assertEquals(null, m.estimatedHeightCm)
         assertTrue(!m.scaledFromTreadmill)
         assertEquals(60 * cmPerPx, m.overstrideCm!!, 2.0)
-        assertTrue((result as GaitResult.Success).warnings.any { "doesn't match" in it })
+        assertTrue((result as GaitResult.Success).warnings.any { "doesn't fit your height" in it && "based on your height" in it })
     }
 
     @Test

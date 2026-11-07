@@ -5,9 +5,6 @@ import android.content.Context
 import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import com.atsukio.runningcoach.AnalysisService
-import com.atsukio.runningcoach.analysis.CrossCheck
-import com.atsukio.runningcoach.analysis.GaitAnalyzer
-import com.atsukio.runningcoach.analysis.GaitResult
 import com.atsukio.runningcoach.pose.GpuCheck
 import com.atsukio.runningcoach.pose.LiveResults
 import com.atsukio.runningcoach.pose.PoseExtractor
@@ -106,44 +103,24 @@ class AnalysisRunner private constructor(private val app: Application) {
             }
             val track = extraction.track
             task.mutableState.value = AnalysisState.Measuring
-            val heightCm = CoachSettings(app).runnerHeightCm
-            val existingCreatedAt = if (task.reanalyse) withContext(Dispatchers.IO) { repo.get(sessionId)?.createdAt } else null
+            val existing = if (task.reanalyse) withContext(Dispatchers.IO) { repo.get(sessionId) } else null
+            // A height chosen for this clip beats the Settings one, so analysing again keeps it.
+            val heightCm = existing?.takeIf { it.scaleEdited }?.runnerHeightCm ?: CoachSettings(app).runnerHeightCm
             val capture = withContext(Dispatchers.IO) {
                 repo.savePose(sessionId, track)
                 val capture = repo.loadCaptureInfo(sessionId)
-                val result = GaitAnalyzer.analyze(track, heightCm, beltSpeedKmh = capture.speedKmh)
-                val success = result as? GaitResult.Success
-                val watchScaleNote = if (success?.metrics?.scaledFromTreadmill == true && capture.speedFromSensor) {
-                    "Distances were scaled from your watch's pace. Typing the treadmill's own speed is more accurate."
-                } else {
-                    null
-                }
-                val videoCadence = success?.metrics?.cadenceSpm
-                val watchCadence = capture.sensor?.cadenceSpm
-                val crossCheck = if (videoCadence != null && watchCadence != null) {
-                    CrossCheck.cadence(videoCadence, watchCadence)
-                } else {
-                    null
-                }
                 repo.save(
-                    Session(
+                    SessionBuilder.build(
                         id = sessionId,
-                        createdAt = existingCreatedAt ?: System.currentTimeMillis(),
-                        speedKmh = capture.speedKmh,
-                        speedFromSensor = capture.speedFromSensor,
-                        runnerHeightCm = heightCm,
-                        fps = track.fps,
+                        createdAt = existing?.createdAt ?: System.currentTimeMillis(),
+                        track = track,
                         playbackFps = info?.playbackFps ?: track.fps,
-                        videoWidth = track.width,
-                        videoHeight = track.height,
-                        metrics = success?.metrics,
-                        warnings = success?.warnings.orEmpty() + extraction.notes + listOfNotNull(crossCheck, watchScaleNote),
-                        failure = (result as? GaitResult.Failure)?.reason,
-                        sensor = capture.sensor,
-                        runId = capture.runId,
-                        runOffsetSec = capture.runOffsetSec,
+                        heightCm = heightCm,
+                        capture = capture,
+                        extractionNotes = extraction.notes,
                         processingSec = (SystemClock.elapsedRealtime() - task.startedAtMs) / 1000.0,
                         analysedLive = extraction.usedLive,
+                        scaleEdited = existing?.scaleEdited ?: false,
                     ),
                 )
                 capture

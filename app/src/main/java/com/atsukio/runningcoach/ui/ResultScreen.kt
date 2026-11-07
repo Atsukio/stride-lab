@@ -91,13 +91,19 @@ import androidx.media3.ui.PlayerView
 import com.atsukio.runningcoach.analysis.Coach
 import com.atsukio.runningcoach.analysis.Feedback
 import com.atsukio.runningcoach.analysis.FeedbackStatus
+import com.atsukio.runningcoach.analysis.GaitAnalyzer
 import com.atsukio.runningcoach.analysis.GaitMetrics
 import com.atsukio.runningcoach.analysis.Landmark
 import com.atsukio.runningcoach.analysis.PoseCleaner
 import com.atsukio.runningcoach.analysis.PoseTrack
 import com.atsukio.runningcoach.data.CoachSettings
 import com.atsukio.runningcoach.data.Session
+import com.atsukio.runningcoach.data.SessionBuilder
 import com.atsukio.runningcoach.data.SessionRepository
+import com.atsukio.runningcoach.data.recalculate
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.text.input.KeyboardType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -134,8 +140,10 @@ fun ResultScreen(id: String, onBack: () -> Unit, onReanalyse: () -> Unit) {
     // -1 until the person steps through landings: then the middle one shows.
     var landingIndex by rememberSaveable { mutableIntStateOf(-1) }
     val scope = rememberCoroutineScope()
+    // Bumped after the speed or height is changed, to load the new measurements.
+    var reloads by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(id) {
+    LaunchedEffect(id, reloads) {
         val loaded = withContext(Dispatchers.IO) {
             val session = repo.get(id) ?: return@withContext null
             // Newest first, so the first earlier clip is the one just before this.
@@ -198,6 +206,7 @@ fun ResultScreen(id: String, onBack: () -> Unit, onReanalyse: () -> Unit) {
                 PaddingValues(top = padding.calculateTopPadding()),
                 landingIndex = shownLanding(result, landingIndex),
                 onLandingIndex = { landingIndex = it },
+                onRecalculated = { reloads++ },
             )
             notFound -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Text("This session no longer exists.")
@@ -337,6 +346,7 @@ private fun ResultContent(
     padding: PaddingValues,
     landingIndex: Int,
     onLandingIndex: (Int) -> Unit,
+    onRecalculated: () -> Unit,
 ) {
     val session = data.session
     val metrics = session.metrics
@@ -396,7 +406,9 @@ private fun ResultContent(
                 )
             }
         }
-        metrics?.estimatedHeightCm?.let { item { HeightCard(it, fromWatch = session.speedFromSensor) } }
+        if (metrics != null && data.pose != null) {
+            item { ScaleCard(session, metrics.estimatedHeightCm, onRecalculated) }
+        }
         items(feedback) { FeedbackCard(it, data.badges[measurementKey(it.topic)]) }
         if (session.warnings.isNotEmpty()) {
             item {
@@ -480,39 +492,125 @@ private fun Summary(session: Session, feedback: List<Feedback>, plan: FocusPlan?
     }
 }
 
-/** The height measured from the treadmill belt, with an offer to save it when it differs from Settings. */
+/**
+ * The treadmill speed and height used to turn pixels into centimetres for this clip. Both can be changed
+ * here for this clip alone; the saved poses are measured again, so the new figures show straight away.
+ */
 @Composable
-private fun HeightCard(estimatedCm: Double, fromWatch: Boolean) {
+private fun ScaleCard(session: Session, estimatedCm: Double?, onRecalculated: () -> Unit) {
     val context = LocalContext.current
     val settings = remember { CoachSettings(context) }
+    val repo = remember { SessionRepository(context) }
+    val scope = rememberCoroutineScope()
     var savedCm by remember { mutableStateOf(settings.runnerHeightCm) }
-    val estimate = estimatedCm.roundToInt()
+    var speedText by remember(session.speedKmh) { mutableStateOf(session.speedKmh?.let(::formatSpeed).orEmpty()) }
+    var heightText by remember(session.runnerHeightCm) { mutableStateOf(session.runnerHeightCm.roundToInt().toString()) }
+    var busy by remember { mutableStateOf(false) }
+    var failed by remember { mutableStateOf(false) }
+
+    val speedBlank = speedText.isBlank()
+    val speed = speedText.replace(',', '.').trim().toDoubleOrNull()
+    val speedOk = speedBlank || (speed != null && SessionBuilder.validSpeed(speed))
+    val newSpeed = if (speedBlank) null else speed
+    val height = heightText.toIntOrNull()?.toDouble()
+    val heightOk = height != null && SessionBuilder.validHeight(height)
+    val speedChanged = (newSpeed == null) != (session.speedKmh == null) ||
+        (newSpeed != null && session.speedKmh != null && abs(newSpeed - session.speedKmh) > 0.005)
+    val heightChanged = height != null && height.roundToInt() != session.runnerHeightCm.roundToInt()
+    val canRecalculate = speedOk && heightOk && (speedChanged || heightChanged) && !busy
+
     LabCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Estimated height: $estimate cm", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "Measured from how fast your planted foot moves with the treadmill belt" +
-                    if (fromWatch) ", using your watch's pace." else ".",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            if (abs(estimate - savedCm.roundToInt()) >= 2) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionLabel("Scale for this clip")
+            if (estimatedCm != null) {
+                val estimate = estimatedCm.roundToInt()
+                Text("From the belt speed you look about $estimate cm tall.", style = MaterialTheme.typography.titleMedium)
+                val gap = abs(estimatedCm - session.runnerHeightCm) / session.runnerHeightCm
+                val typed = session.speedKmh
+                if (gap > GaitAnalyzer.SPEED_MISMATCH && typed != null) {
+                    // Far off: the speed is the likelier mistake, so offer the speed that fits first.
+                    val fitting = GaitAnalyzer.fittingSpeedKmh(typed, session.runnerHeightCm, estimatedCm)
                     Text(
-                        "Settings: ${savedCm.roundToInt()} cm",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.weight(1f),
+                        "That doesn't fit your ${session.runnerHeightCm.roundToInt()} cm, so the treadmill was probably " +
+                            "running at about ${"%.1f".format(fitting)} km/h, not ${formatSpeed(typed)}. Enter what it was set to.",
+                        style = MaterialTheme.typography.bodyMedium,
                     )
-                    TextButton(onClick = {
-                        settings.runnerHeightCm = estimate.toDouble()
-                        savedCm = estimate.toDouble()
-                    }) { Text("Use $estimate cm") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = { speedText = "%.1f".format(fitting) }) { Text("Try ${"%.1f".format(fitting)} km/h") }
+                        TextButton(onClick = { heightText = estimate.toString() }) { Text("Use $estimate cm") }
+                    }
+                } else if (abs(estimate - session.runnerHeightCm.roundToInt()) >= 8) {
+                    Text(
+                        "That is a little way from ${session.runnerHeightCm.roundToInt()} cm, so check the speed you entered.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    TextButton(onClick = { heightText = estimate.toString() }) { Text("Use $estimate cm for this clip") }
                 }
             } else {
                 Text(
-                    "Matches your height in Settings.",
+                    if (session.speedKmh == null) "No treadmill speed, so distances come from the height below."
+                    else "The treadmill speed doesn't match the video, so distances come from the height below.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = speedText,
+                    onValueChange = { speedText = it.filter { c -> c.isDigit() || c == '.' || c == ',' }.take(5); failed = false },
+                    label = { Text("Speed (km/h)") },
+                    singleLine = true,
+                    isError = !speedOk,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedTextField(
+                    value = heightText,
+                    onValueChange = { heightText = it.filter(Char::isDigit).take(3); failed = false },
+                    label = { Text("Height (cm)") },
+                    singleLine = true,
+                    isError = !heightOk,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Text(
+                "With a speed, distances come from the belt and height is only a check. Leave the speed blank to use height alone. " +
+                    "Speed 3 to 30 km/h, height 120 to 220 cm.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (session.scaleEdited) {
+                Text(
+                    "Changed by hand for this clip. Analysing it again keeps these.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            if (failed) {
+                Text("Couldn't recalculate this clip.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(
+                    onClick = {
+                        busy = true
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) {
+                                runCatching { repo.recalculate(session.id, newSpeed, height!!) }.getOrNull()
+                            }
+                            busy = false
+                            if (result == null) failed = true else onRecalculated()
+                        }
+                    },
+                    enabled = canRecalculate,
+                ) {
+                    if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Recalculate")
+                }
+                if (heightOk && height!!.roundToInt() != savedCm.roundToInt()) {
+                    TextButton(onClick = {
+                        settings.runnerHeightCm = height
+                        savedCm = height
+                    }) { Text("Make ${height.roundToInt()} cm my default") }
+                }
             }
         }
     }

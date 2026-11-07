@@ -188,7 +188,8 @@ fun LandingCard(
 /** The annotation for landing [frame], with distances in cm when the leg length is known. */
 internal fun landingAnnotation(track: PoseTrack, metrics: GaitMetrics, frame: Int): LandingAnnotation? {
     val legCm = metrics.overstrideCm?.let { cm -> metrics.overstrideLegRatio?.takeIf { abs(it) > 1e-6 }?.let { cm / it } }
-    return LandingAnnotation.at(track, frame, legCm)
+    val time = metrics.contactFrames.indexOf(frame).takeIf { it >= 0 }?.let { metrics.contactTimes.getOrNull(it) } ?: frame.toDouble()
+    return LandingAnnotation.at(track, frame, legCm, time)
 }
 
 private fun describe(a: LandingAnnotation) = listOfNotNull(

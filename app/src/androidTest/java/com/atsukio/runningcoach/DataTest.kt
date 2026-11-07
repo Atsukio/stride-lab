@@ -5,10 +5,12 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.atsukio.runningcoach.data.CrashLog
 import com.atsukio.runningcoach.data.SessionRepository
+import com.atsukio.runningcoach.data.recalculate
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -45,6 +47,16 @@ class DataTest {
         assertFalse(repo.hasVideo(old))
         assertNotNull("the results of the old clip stay", repo.get(old)?.metrics)
         assertTrue(repo.hasVideo(recent))
+    }
+
+    @Test
+    fun recalculatingWithoutSavedPosesChangesNothing() {
+        val id = newSession(createdAt = 1_000)
+        val before = repo.get(id)
+
+        assertNull(repo.recalculate(id, speedKmh = 7.0, heightCm = 165.0))
+
+        assertEquals(before, repo.get(id))
     }
 
     @Test

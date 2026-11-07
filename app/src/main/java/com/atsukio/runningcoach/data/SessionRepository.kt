@@ -84,6 +84,8 @@ class SessionRepository(context: Context) {
     /** Whether this session still has its video. Results remain after the video is removed. */
     fun hasVideo(id: String): Boolean = videoFile(id).exists()
 
+    fun hasPose(id: String): Boolean = File(File(root, id), POSE_FILE).exists()
+
     fun saveCaptureInfo(id: String, info: CaptureInfo) {
         File(dir(id), CAPTURE_FILE).writeText(json.encodeToString(info))
     }

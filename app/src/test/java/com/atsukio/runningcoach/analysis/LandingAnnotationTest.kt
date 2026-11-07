@@ -19,7 +19,7 @@ class LandingAnnotationTest {
         assertEquals(60.0 * legCm / 400, a!!.overstrideCm!!, 3.0)
         assertEquals(6.0, a.leanDeg, 1.5)
         // Across all landings, the drawn angles are the measurements the analysis reports (it takes the median).
-        val all = metrics.contactFrames.mapNotNull { LandingAnnotation.at(track, it, legCm) }
+        val all = metrics.contactFrames.mapIndexedNotNull { i, frame -> LandingAnnotation.at(track, frame, legCm, metrics.contactTimes[i]) }
         assertEquals(metrics.shinAngleDeg!!, all.map { it.shinDeg }.median()!!, 1.5)
         assertEquals(metrics.kneeFlexionAtContactDeg!!, all.map { it.kneeFlexionDeg }.median()!!, 1.5)
     }

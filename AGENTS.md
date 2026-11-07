@@ -92,6 +92,23 @@ app/src/main/java/com/atsukio/runningcoach/
 - Never mix GPU and CPU detections within one clip. `GpuCheck` compares GPU with CPU once per phone and Android version (some drivers, including the Pixel 10 Pro's, gave 10% low cadence) and falls back to CPU.
 - Left and right legs get swapped by the detector. `PoseCleaner` fixes this; check that UI work uses the cleaned
   track unless it is deliberately showing the Raw view.
+- Speed and height are per clip. `Session.scaleEdited` marks a clip whose scale was changed on the results screen;
+  `SessionRepository.recalculate` re-measures from the saved poses (no detection), and a full re-analysis keeps that
+  clip's height. Build sessions only through `SessionBuilder.build` so both paths stay in step.
+- GPU and CPU poses agree to about 0.3% of frame height, but landing figures (foot ahead of hips, shin, balance)
+  moved by several cm between them on a 30 fps clip, because landings are whole frames and the belt moves the foot
+  ~5.7 cm per frame. Checked on the Pixel with `GpuDiagnosticTest` (run by hand with `am instrument`, never with
+  `connectedDebugAndroidTest`, which uninstalls the app). Landings are now measured at an interpolated moment
+  (`GaitMetrics.contactTimes`), which cut the GPU/CPU gap on that clip from 2.6 cm to 0.6 cm (foot ahead of hips)
+  and 4.4° to 0.5° (shin). Left/right balance (15 vs 27 cm) came from picking the trailing foot, still flat on
+  the belt, as the landing foot on a third of landings ("lowest heel"); the landing foot is now the front one and
+  balance compares medians (2.5 vs 2.1 cm after). The synthetic runner can't show either problem, so use a real clip.
+- `Session.measureVersion` / `SessionBuilder.MEASURE_VERSION`: raise it whenever a change moves the figures, so
+  Storage > "Older results" offers to re-measure old clips from their saved poses.
+- MediaPipe given a model *path* re-copies it into `cache/mediapipe_asset_cache` on every detector created, and
+  parallel detectors crashed the app with SIGBUS (seen on the Pixel 4, 5 and 7 Nov). `PoseModel` maps the model
+  from the APK once and passes a buffer; never go back to `setModelAssetPath`.
+- To find the Pixel run's crash, read `adb logcat -d -b crash`: native crashes skip the in-app crash log.
 - The share FileProvider exposes only `cacheDir/shared/`, and that folder is cleared on each share. Keep it that way.
 - The setup diagram must clearly show the camera **side-on** to the runner, never facing them.
 - `MediaMetadataRetriever` frame grabs are slow. Do them off the main thread (`Dispatchers.IO`).

@@ -33,6 +33,12 @@ data class Session(
     val processingSec: Double? = null,
     /** Whether the poses came from analysing while recording. */
     val analysedLive: Boolean = false,
+    /** True once the speed or height was changed by hand for this clip, so a re-analysis keeps them. */
+    val scaleEdited: Boolean = false,
+    /** Notes from reading the video (such as a dropped frame rate), kept so a recalculation can repeat them. */
+    val extractionNotes: List<String> = emptyList(),
+    /** Which version of the measuring code made [metrics]; see [SessionBuilder.MEASURE_VERSION]. */
+    val measureVersion: Int = 0,
 )
 
 /** What was known when a clip was captured, saved until the clip has been analysed. */
