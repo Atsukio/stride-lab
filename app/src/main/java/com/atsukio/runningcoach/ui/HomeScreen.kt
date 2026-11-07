@@ -17,6 +17,11 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.LinearProgressIndicator
+import com.atsukio.runningcoach.analysis.PlanTracker
+import com.atsukio.runningcoach.analysis.PlanClip
+import com.atsukio.runningcoach.analysis.FocusPlan
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -90,6 +95,7 @@ fun HomeScreen(
     val activeRun by remember { RunRecorder.get(context) }.active.collectAsStateWithLifecycle()
     var items by remember { mutableStateOf<List<HomeItem>?>(null) }
     var showSettings by remember { mutableStateOf(false) }
+    var plan by remember { mutableStateOf(settings.focusPlan) }
 
     LaunchedEffect(Unit) {
         items = withContext(Dispatchers.IO) {
@@ -152,8 +158,21 @@ fun HomeScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 item { RecordHero(onRecord = onNewAnalysis) }
-                item { WholeRunCard(inProgress = activeRun != null, onClick = onStartRun) }
                 val analysed = list.filterIsInstance<HomeItem.Clip>().map { it.session }.filter { it.metrics != null }
+                plan?.let { active ->
+                    item {
+                        PlanCard(
+                            plan = active,
+                            clips = analysed.map { PlanClip(it.createdAt, it.metrics!!, it.speedKmh) },
+                            onCheckIn = onNewAnalysis,
+                            onEnd = {
+                                settings.focusPlan = null
+                                plan = null
+                            },
+                        )
+                    }
+                }
+                item { WholeRunCard(inProgress = activeRun != null, onClick = onStartRun) }
                 if (analysed.size >= 2) item { TrendsCard(analysed, onClick = onOpenTrends) }
                 if (list.isEmpty()) item { FilmingTips(onOpenGuide = onOpenGuide) } else item { SectionLabel("History", Modifier.padding(top = 8.dp)) }
                 items(list, key = { if (it is HomeItem.Run) "run-${it.run.id}" else (it as HomeItem.Clip).session.id }) { item ->
@@ -276,6 +295,39 @@ private fun SessionCard(session: Session, onClick: () -> Unit) {
                     session.speedKmh?.let { StatChip(formatSpeed(it), "km/h") }
                     metrics.overstrideCm?.let { StatChip("${it.roundToInt()}", "cm overstride") }
                 }
+            }
+        }
+    }
+}
+
+/** The focus being worked on, how far through it is, and how the latest check-in clip measured up. */
+@Composable
+private fun PlanCard(plan: FocusPlan, clips: List<PlanClip>, onCheckIn: () -> Unit, onEnd: () -> Unit) {
+    val progress = remember(plan, clips) { PlanTracker.progress(plan, System.currentTimeMillis(), clips) }
+    LabCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionLabel(
+                "Focus plan · day ${progress.day} of ${progress.totalDays}",
+                colour = if (progress.reachedGoal) signalColour(true) else MaterialTheme.colorScheme.primary,
+            )
+            Text(plan.topic, style = MaterialTheme.typography.titleLarge)
+            LinearProgressIndicator(progress = { progress.fraction }, modifier = Modifier.fillMaxWidth())
+            plan.cue?.let { Text("Think: \"$it\"", color = MaterialTheme.colorScheme.primary) }
+            plan.drill?.let { Text("Drill: $it", style = MaterialTheme.typography.bodyMedium) }
+            val latest = progress.latest
+            Text(
+                when {
+                    progress.reachedGoal -> "Your latest check-in is in the good range: " + latest?.value.orEmpty()
+                    latest != null -> "Latest check-in: ${latest.value}, still to work on."
+                    progress.timeIsUp -> "Time's up. Film a check-in to see how it went."
+                    else -> "Practise the drill a few times a week, then film a check-in clip."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!progress.reachedGoal) Button(onClick = onCheckIn) { Text("Film a check-in") }
+                OutlinedButton(onClick = onEnd) { Text(if (progress.finished) "Finish plan" else "End plan") }
             }
         }
     }

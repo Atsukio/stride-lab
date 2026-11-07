@@ -98,10 +98,17 @@ object GaitAnalyzer {
 
         val dir = facing(s)
 
-        val contacts = mergeContacts(
+        val allContacts = mergeContacts(
             Side.entries.flatMap { detectContacts(s.y(it.heel), legPx) },
             minGapFrames = (0.2 * fps).roundToInt(),
         )
+        // Only the steady part of the clip is measured: the first steps while the pace settles, or a slowdown at
+        // the end, would otherwise pull every figure towards a pace the runner wasn't holding.
+        val contacts = steadyStretch(allContacts)
+        if (contacts.size < allContacts.size - 1) {
+            warnings += "Measured the steady part of the clip, from %.1f s to %.1f s. The start and end, where your pace was still changing, were left out."
+                .format(contacts.first() / fps, contacts.last() / fps)
+        }
         if (contacts.size < 4) {
             return GaitResult.Failure(
                 "Couldn't find enough foot landings. Record at least 10 seconds with the feet visible the whole time.",
@@ -169,14 +176,15 @@ object GaitAnalyzer {
             if (ys.size < 3) null else ys.max() - ys.min()
         }
 
-        val lean = (0 until n).mapNotNull { f ->
+        val steadyFrames = contacts.first()..contacts.last()
+        val lean = steadyFrames.mapNotNull { f ->
             val hip = s.hipMid(f)
             val shoulder = s.shoulderMid(f)
             if (!hip.isValid || !shoulder.isValid) return@mapNotNull null
             Math.toDegrees(atan2(dir * (shoulder.x - hip.x), hip.y - shoulder.y))
         }
 
-        val elbow = (0 until n).flatMap { f ->
+        val elbow = steadyFrames.flatMap { f ->
             Side.entries.mapNotNull { side ->
                 val sh = s.point(side.shoulder, f)
                 val el = s.point(side.elbow, f)
@@ -210,6 +218,30 @@ object GaitAnalyzer {
             scaledFromTreadmill = estimatedHeight != null,
         )
         return GaitResult.Success(metrics, warnings)
+    }
+
+    /**
+     * The longest run of landings where each step takes within about a quarter of the clip's typical step
+     * time. Returns every landing unless that run is long enough (6 landings) to measure on its own.
+     */
+    internal fun steadyStretch(contacts: List<Int>): List<Int> {
+        if (contacts.size < 8) return contacts
+        val intervals = contacts.zipWithNext { a, b -> (b - a).toDouble() }
+        val typical = intervals.median() ?: return contacts
+        val steady = intervals.map { it in 0.8 * typical..1.25 * typical }
+        var bestStart = 0
+        var bestLength = 0
+        var start = 0
+        for (i in 0..steady.size) {
+            if (i < steady.size && steady[i]) continue
+            if (i - start > bestLength) {
+                bestStart = start
+                bestLength = i - start
+            }
+            start = i + 1
+        }
+        // bestLength intervals span bestLength + 1 landings.
+        return if (bestLength + 1 >= 6) contacts.subList(bestStart, bestStart + bestLength + 1) else contacts
     }
 
     /** Thigh plus shin length, taken near the top of the range since 2D projection only shortens it. */

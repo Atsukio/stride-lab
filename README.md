@@ -39,6 +39,14 @@ Everything runs on the phone: there is no internet permission, no cloud service,
   (head or feet cut off, facing the camera, too small, off-centre, too dark).
 - **Metronome** at a chosen step rate, on the camera and run screens; the cadence card can set it to your target.
 - **Progress:** every measurement charted across your clips against its good range.
+- **Steady part only:** the first steps while your pace settles, and any slowdown at the end, are left out
+  of the measurements (`GaitAnalyzer.steadyStretch`); the results say which seconds were used.
+- **Milestones:** a measurement shows a star the first time it reaches its good range, or when it is closer
+  than in any earlier clip (`analysis/PersonalBests.kt`).
+- **Last time:** the replay can draw the previous clip's skeleton, dashed, at the same step of the stride and the same
+  size (`analysis/GhostAligner.kt`), so differences in form show.
+- **Focus plan:** start a three-week plan from a result's main focus. Home shows the day, the cue and drill, and how
+  your latest check-in clip measured up (`analysis/FocusPlan.kt`).
 - **Appearance:** a dark "lab" look by default, with light and system options in Settings.
 - **Storage:** remove old videos but keep their results; a local crash log you can share yourself.
 - **Share results** from the results screen: a summary image of every measurement, optionally with an annotated

@@ -2,7 +2,9 @@ package com.atsukio.runningcoach.data
 
 import android.content.Context
 import androidx.core.content.edit
+import com.atsukio.runningcoach.analysis.FocusPlan
 import com.atsukio.runningcoach.ui.Appearance
+import kotlinx.serialization.json.Json
 
 class CoachSettings(context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -32,6 +34,13 @@ class CoachSettings(context: Context) {
         get() = prefs.getBoolean(KEY_GUIDE_SEEN, false)
         set(value) = prefs.edit { putBoolean(KEY_GUIDE_SEEN, value) }
 
+    /** The focus plan being followed, if any. */
+    var focusPlan: FocusPlan?
+        get() = prefs.getString(KEY_PLAN, null)?.let { runCatching { Json.decodeFromString<FocusPlan>(it) }.getOrNull() }
+        set(value) = prefs.edit {
+            if (value == null) remove(KEY_PLAN) else putString(KEY_PLAN, Json.encodeToString(value))
+        }
+
     /** Dark, light or the phone's choice, stored by name. */
     var appearance: Appearance
         get() = runCatching { Appearance.valueOf(prefs.getString(KEY_APPEARANCE, null).orEmpty()) }.getOrDefault(Appearance.DARK)
@@ -46,6 +55,7 @@ class CoachSettings(context: Context) {
         val RECORD_OPTIONS = listOf(10, 15, 20, 30)
         val METRONOME_RANGE = 140..210
         private const val DEFAULT_METRONOME_SPM = 170
+        private const val KEY_PLAN = "focus_plan"
         private const val KEY_APPEARANCE = "appearance"
         private const val KEY_METRONOME = "metronome_spm"
         private const val KEY_GUIDE_SEEN = "guide_seen"

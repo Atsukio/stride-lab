@@ -14,6 +14,16 @@ import com.atsukio.runningcoach.share.ResultSharer
 import kotlinx.coroutines.launch
 import androidx.annotation.OptIn
 import androidx.compose.foundation.Canvas
+import com.atsukio.runningcoach.analysis.measurementKey
+import com.atsukio.runningcoach.analysis.FocusPlan
+import com.atsukio.runningcoach.analysis.FramePose
+import com.atsukio.runningcoach.analysis.PersonalBests
+import com.atsukio.runningcoach.analysis.GhostAligner
+import com.atsukio.runningcoach.analysis.EarlierClip
+import com.atsukio.runningcoach.analysis.Badge
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -95,11 +105,21 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /** [pose] is cleaned for display and analysis; [rawPose] is exactly what the detector found. */
-private class ResultData(val session: Session, val pose: PoseTrack?, val rawPose: PoseTrack?, val previous: GaitMetrics?)
+private class ResultData(
+    val session: Session,
+    val pose: PoseTrack?,
+    val rawPose: PoseTrack?,
+    val previous: GaitMetrics?,
+    /** Milestones against every earlier clip, keyed by coaching topic. */
+    val badges: Map<String, Badge> = emptyMap(),
+    /** The previous clip's skeleton lined up with this one, when both have enough landings. */
+    val ghost: GhostAligner? = null,
+)
 
 private val LeftColor = Color(0xFF4FC3F7)
 private val RightColor = Color(0xFFFFB74D)
 private val LandingColor = Color(0xFFFFEB3B)
+private val GhostColor = Color(0xFF8BE9C1)
 
 @kotlin.OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -118,9 +138,25 @@ fun ResultScreen(id: String, onBack: () -> Unit, onReanalyse: () -> Unit) {
     LaunchedEffect(id) {
         val loaded = withContext(Dispatchers.IO) {
             val session = repo.get(id) ?: return@withContext null
-            val previous = repo.list().firstOrNull { it.createdAt < session.createdAt && it.metrics != null }
+            // Newest first, so the first earlier clip is the one just before this.
+            val earlier = repo.list().filter { it.createdAt < session.createdAt && it.metrics != null }
+            val previous = earlier.firstOrNull()
             val raw = repo.loadPose(id)
-            ResultData(session, raw?.let(PoseCleaner::clean), raw, previous?.metrics)
+            val cleaned = raw?.let(PoseCleaner::clean)
+            val badges = session.metrics?.let { metrics ->
+                PersonalBests.badges(metrics, session.speedKmh, earlier.map { EarlierClip(it.metrics!!, it.speedKmh) })
+            }.orEmpty().associateBy { it.topic }
+            val ghost = previous?.let { prev ->
+                val previousPose = repo.loadPose(prev.id)?.let(PoseCleaner::clean)
+                val here = session.metrics?.contactFrames
+                val there = prev.metrics?.contactFrames
+                if (cleaned != null && previousPose != null && here != null && there != null) {
+                    GhostAligner.create(cleaned, here, previousPose, there)
+                } else {
+                    null
+                }
+            }
+            ResultData(session, cleaned, raw, previous?.metrics, badges, ghost)
         }
         data = loaded
         notFound = loaded == null
@@ -323,6 +359,7 @@ private fun ResultContent(
                     pose = data.pose,
                     rawPose = data.rawPose,
                     contactFrames = metrics?.contactFrames.orEmpty(),
+                    ghost = data.ghost,
                 )
             }
         } else {
@@ -336,7 +373,16 @@ private fun ResultContent(
                 }
             }
         }
-        item { Summary(session, feedback) }
+        item {
+            val context = LocalContext.current
+            val settings = remember { CoachSettings(context) }
+            var plan by remember { mutableStateOf(settings.focusPlan) }
+            Summary(session, feedback, plan) { focus ->
+                val started = FocusPlan.from(focus, System.currentTimeMillis())
+                settings.focusPlan = started
+                plan = started
+            }
+        }
         if (hasVideo && metrics != null && data.pose != null && metrics.contactFrames.isNotEmpty()) {
             item {
                 LandingCard(
@@ -351,7 +397,7 @@ private fun ResultContent(
             }
         }
         metrics?.estimatedHeightCm?.let { item { HeightCard(it, fromWatch = session.speedFromSensor) } }
-        items(feedback) { FeedbackCard(it) }
+        items(feedback) { FeedbackCard(it, data.badges[measurementKey(it.topic)]) }
         if (session.warnings.isNotEmpty()) {
             item {
                 LabCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
@@ -374,7 +420,7 @@ private fun ResultContent(
 }
 
 @Composable
-private fun Summary(session: Session, feedback: List<Feedback>) {
+private fun Summary(session: Session, feedback: List<Feedback>, plan: FocusPlan?, onStartPlan: (Feedback) -> Unit) {
     val failure = session.failure
     LabCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -390,6 +436,13 @@ private fun Summary(session: Session, feedback: List<Feedback>) {
                 Text(focus.topic, style = MaterialTheme.typography.headlineSmall)
                 focus.cue?.let {
                     Text("Think: \"$it\"", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
+                }
+                if (plan != null && measurementKey(plan.topic) == measurementKey(focus.topic)) {
+                    SectionLabel("In your focus plan", colour = signalColour(true))
+                } else {
+                    OutlinedButton(onClick = { onStartPlan(focus) }) {
+                        Text(if (plan == null) "Start a 3-week plan for this" else "Switch my plan to this")
+                    }
                 }
             } else {
                 SectionLabel("All clear", colour = signalColour(true))
@@ -466,7 +519,7 @@ private fun HeightCard(estimatedCm: Double, fromWatch: Boolean) {
 }
 
 @Composable
-private fun FeedbackCard(item: Feedback) {
+private fun FeedbackCard(item: Feedback, badge: Badge?) {
     val good = signalColour(true)
     val (statusText, tint) = when (item.status) {
         FeedbackStatus.GOOD -> "In range" to good
@@ -478,7 +531,10 @@ private fun FeedbackCard(item: Feedback) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(item.topic, style = MaterialTheme.typography.titleMedium)
-                    SectionLabel(statusText, colour = tint)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        SectionLabel(statusText, colour = tint)
+                        badge?.let { BadgePill(it) }
+                    }
                 }
                 // Long values ("14° at landing, 38° max") are set smaller and wrap, so they don't squeeze the title.
                 Text(
@@ -516,6 +572,7 @@ private fun VideoReplay(
     pose: PoseTrack?,
     rawPose: PoseTrack?,
     contactFrames: List<Int>,
+    ghost: GhostAligner?,
 ) {
     val context = LocalContext.current
     val player = remember {
@@ -533,6 +590,7 @@ private fun VideoReplay(
     var playing by remember { mutableStateOf(true) }
     var showSkeleton by remember { mutableStateOf(true) }
     var showRaw by remember { mutableStateOf(false) }
+    var showGhost by remember { mutableStateOf(false) }
     var positionMs by remember { mutableLongStateOf(0L) }
     LaunchedEffect(speed) { player.setPlaybackSpeed(speed) }
     LaunchedEffect(playing) { player.playWhenReady = playing }
@@ -555,7 +613,14 @@ private fun VideoReplay(
                 )
                 if (showSkeleton && pose != null) {
                     val frame = frameAt(positionMs, playbackFps)
-                    SkeletonOverlay(if (showRaw && rawPose != null) rawPose else pose, frame, contactFrames, playbackFps, Modifier.fillMaxSize())
+                    SkeletonOverlay(
+                        if (showRaw && rawPose != null) rawPose else pose,
+                        frame,
+                        contactFrames,
+                        playbackFps,
+                        Modifier.fillMaxSize(),
+                        ghost = if (showGhost) ghost?.frameAt(frame) else null,
+                    )
                 }
             }
         }
@@ -588,6 +653,10 @@ private fun VideoReplay(
                 // Shows exactly what the detector found, before swaps, jumps and jitter are cleaned up.
                 FilterChip(selected = showRaw, onClick = { showRaw = !showRaw }, label = { Text("Raw") })
             }
+            if (ghost != null) {
+                // The previous clip's skeleton in the same step of the stride, so differences in form show up.
+                FilterChip(selected = showGhost, onClick = { showGhost = !showGhost }, label = { Text("Last time") })
+            }
             Spacer(Modifier.weight(1f))
             Text(
                 "Frame $frame · %.2f s".format(positionMs / 1000.0),
@@ -605,6 +674,7 @@ private fun SkeletonOverlay(
     contactFrames: List<Int>,
     playbackFps: Float,
     modifier: Modifier,
+    ghost: FramePose? = null,
 ) {
     val landingWindow = (playbackFps * 0.05f).roundToInt().coerceAtLeast(1)
     Canvas(modifier) {
@@ -616,6 +686,17 @@ private fun SkeletonOverlay(
             // Points the detector wasn't sure of (often the far leg, hidden behind the near one) are drawn faintly.
             val sure = pose.visibility[a] >= SURE_VISIBILITY && pose.visibility[b] >= SURE_VISIBILITY
             drawLine(if (sure) color else color.copy(alpha = 0.35f), point(a), point(b), stroke, StrokeCap.Round)
+        }
+        ghost?.let { earlier ->
+            // Dashed, in mint, behind the current skeleton.
+            val dash = PathEffect.dashPathEffect(floatArrayOf(10.dp.toPx(), 7.dp.toPx()))
+            fun ghostPoint(i: Int) = Offset(earlier.x[i] * size.width, earlier.y[i] * size.height)
+            val links = Landmark.LEFT_CONNECTIONS + Landmark.RIGHT_CONNECTIONS + Landmark.CENTER_CONNECTIONS
+            links.forEach { (a, b) ->
+                if (!earlier.x[a].isNaN() && !earlier.x[b].isNaN()) {
+                    drawLine(GhostColor, ghostPoint(a), ghostPoint(b), stroke, StrokeCap.Round, pathEffect = dash)
+                }
+            }
         }
         Landmark.LEFT_CONNECTIONS.forEach { (a, b) -> limb(LeftColor, a, b) }
         Landmark.RIGHT_CONNECTIONS.forEach { (a, b) -> limb(RightColor, a, b) }
@@ -631,6 +712,20 @@ private fun SkeletonOverlay(
 }
 
 private const val SURE_VISIBILITY = 0.5f
+
+/** A small milestone tag next to a measurement, e.g. "First time in range". */
+@Composable
+private fun BadgePill(badge: Badge) {
+    val colour = signalColour(true)
+    Text(
+        "\u2605 " + badge.kind.label,
+        style = MaterialTheme.typography.labelSmall,
+        color = colour,
+        modifier = Modifier
+            .border(1.dp, colour.copy(alpha = 0.6f), RoundedCornerShape(50))
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+    )
+}
 
 /**
  * The pose frame showing at [positionMs]. The player reports whole milliseconds, rounded down, so a
