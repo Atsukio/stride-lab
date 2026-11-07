@@ -23,9 +23,10 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      # Downloads and checksum-checks the pose model, then tests, lints and builds.
+      # Downloads and checksum-checks the pose model, then tests, lints and builds. The instrumented tests are only
+      # compiled here: they need a device, so they are run by hand (see README).
       - name: Test, lint and build
-        run: ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease assembleDebugAndroidTest
 
       - name: Upload test and lint reports
         if: always()

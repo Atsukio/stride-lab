@@ -37,7 +37,13 @@ machine points at JDK 17. App code targets Java 17. compileSdk and targetSdk are
   notices. A change must not add any; read `app/build/reports/lint-results-debug.txt` to check.
 - Unit tests are in `app/src/test/`. The analysis code is pure Kotlin and is tested against a synthetic
   runner. Add or update tests whenever logic in `analysis/`, `pose/`, `sensors/` or `share/` changes.
-- CI (`.github/workflows/build.yml`) runs `testDebugUnitTest lintDebug assembleDebug assembleRelease` on every push.
+- CI (`.github/workflows/build.yml`) runs `testDebugUnitTest lintDebug assembleDebug assembleRelease assembleDebugAndroidTest`
+  on every push (the instrumented tests are only compiled there).
+- **Instrumented tests** are in `app/src/androidTest/`. Run them with
+  `ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest`. Always set `ANDROID_SERIAL`: Gradle otherwise
+  runs them on every attached device, including the user's Pixel, which holds their real clips. The tests are written
+  not to touch real data (old-dated fixtures, the crash log is restored), but still never run them on the Pixel
+  without being asked. Fixtures live in `Fixtures.kt`; add a test there when you add a screen or a share path.
 - Use the Gradle quiet flag `-q` to keep output short. Stop the daemon when you're done (`./gradlew --stop`).
 
 ## Devices
@@ -121,13 +127,12 @@ figures. It lives in `ui/Theme.kt` (colours, typography, shapes, `Appearance` se
 
 ### Idea backlog (not started)
 
-- Ghost comparison: overlay a previous session's skeleton on the replay.
-- Spoken cues during a whole run (on-device text-to-speech only).
-- A focus plan: a few weeks of drills built from the main focus, with check-in clips.
-- Personal-best badges when a measurement reaches its good range.
-- Background analysis, so the app can be left while a clip is processed.
-- Storage controls: show the space clips use, and delete old videos but keep their results.
-- A local crash log the user can choose to share (never uploaded automatically).
-- Instrumented tests for the camera and share flows.
-- Auto-trim: cut the start and end of a clip where the runner isn't yet at steady pace.
-- Front and rear view analysis (knee collapse, hip drop, crossover), as listed in the README limitations.
+Done so far: share image, storage controls, crash log, dark lab redesign, steady-part trimming, milestones, last-time
+ghost, focus plan, spoken cues, background analysis, instrumented tests.
+
+- Front and rear view analysis (knee collapse, hip drop, crossover). `GaitAnalyzer` rejects those views today; this
+  needs different landmarks and metrics, a camera-placement guide, and real footage to check against before it can be trusted.
+- Redesign the capture and run screens fully in the lab style (they inherit the theme but weren't reworked).
+- Pose detection fallback for phones with no ARM libraries (today clips can't be analysed on them).
+- Light-theme pass: screenshots of every screen in light mode.
+- A Play Store release pass using the `android-play-release` skill (version bump, notes, screenshots).

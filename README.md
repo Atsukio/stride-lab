@@ -95,7 +95,11 @@ Requires JDK 21 and the Android SDK (compileSdk 36). Built with Gradle 9.6 and A
 ./gradlew assembleDebug        # app/build/outputs/apk/debug/app-debug.apk
 ./gradlew testDebugUnitTest    # analysis tests on a synthetic runner
 ./gradlew assembleRelease      # shrunk release build (sign it before installing)
+./gradlew connectedDebugAndroidTest   # instrumented tests: share image and intent, storage, crash log, screens
 ```
+
+The instrumented tests need an emulator or phone and don't use pose detection. If more than one device is
+attached, set `ANDROID_SERIAL` to the one to use, so they never run on a phone you didn't mean (`export ANDROID_SERIAL=emulator-5554`).
 
 The first build downloads the pose model (~9 MB) into `app/src/main/assets/` and checks its SHA-256, so a changed
 or corrupted file stops the build. It's ignored by git. GitHub Actions tests, lints and builds every push.
