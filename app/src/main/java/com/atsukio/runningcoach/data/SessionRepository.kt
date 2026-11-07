@@ -10,6 +10,9 @@ import java.io.DataOutputStream
 import java.io.File
 import java.util.UUID
 
+/** Bytes kept on the phone for sessions: the videos, and the results and pose data. */
+data class StorageUsage(val videoBytes: Long, val otherBytes: Long)
+
 /**
  * Stores each session in app-private storage: `sessions/<id>/` holds the video,
  * the pose track and the results, and `runs/<id>.json` holds whole runs.
@@ -48,6 +51,38 @@ class SessionRepository(context: Context) {
             .filter { !File(it, SESSION_FILE).exists() && it.lastModified() < cutoff }
             .forEach { it.deleteRecursively() }
     }
+
+    /** Bytes used by the saved videos, and by everything else kept for each session. */
+    fun storageUsage(): StorageUsage {
+        var video = 0L
+        var other = 0L
+        root.listFiles().orEmpty().forEach { dir ->
+            dir.listFiles().orEmpty().forEach { file ->
+                if (file.name == "video.mp4") video += file.length() else other += file.length()
+            }
+        }
+        return StorageUsage(videoBytes = video, otherBytes = other)
+    }
+
+    /**
+     * Deletes the video of every finished session recorded before [cutoffMs], keeping its results and
+     * pose data. Returns how many videos were removed and the bytes freed.
+     */
+    fun deleteVideosBefore(cutoffMs: Long): Pair<Int, Long> {
+        var count = 0
+        var freed = 0L
+        list().filter { it.createdAt < cutoffMs }.forEach { session ->
+            val video = videoFile(session.id)
+            if (video.exists()) {
+                freed += video.length()
+                if (video.delete()) count++
+            }
+        }
+        return count to freed
+    }
+
+    /** Whether this session still has its video. Results remain after the video is removed. */
+    fun hasVideo(id: String): Boolean = videoFile(id).exists()
 
     fun saveCaptureInfo(id: String, info: CaptureInfo) {
         File(dir(id), CAPTURE_FILE).writeText(json.encodeToString(info))

@@ -131,7 +131,10 @@ fun CoachApp() {
                 onReanalyse = { nav.navigate("analyse/$id?reanalyse=true") },
             )
         }
-        composable("about") { AboutScreen(onBack = { nav.popBackStack() }) }
+        composable("about") {
+            AboutScreen(onBack = { nav.popBackStack() }, onOpenStorage = { nav.navigate("storage") })
+        }
+        composable("storage") { StorageScreen(onBack = { nav.popBackStack() }) }
         composable("runsummary/{id}") { entry ->
             RunSummaryScreen(
                 id = entry.arguments?.getString("id").orEmpty(),

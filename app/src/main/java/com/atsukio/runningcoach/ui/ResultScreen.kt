@@ -180,8 +180,11 @@ fun ResultScreen(id: String, onBack: () -> Unit, onReanalyse: () -> Unit) {
         val video = repo.videoFile(id)
         val landing = shownLanding(shareData, landingIndex)
         ShareDialog(
-            landingNumber = landing.takeIf { shareData.session.metrics?.contactFrames?.isNotEmpty() == true }?.plus(1),
-            videoMb = video.length() / 1_048_576.0,
+            landingNumber = landing.takeIf {
+                video.exists() && shareData.session.metrics?.contactFrames?.isNotEmpty() == true
+            }?.plus(1),
+            // Null when the video has been removed to save space.
+            videoMb = video.takeIf { it.exists() }?.let { it.length() / 1_048_576.0 },
             busy = sharing,
             onDismiss = { if (!sharing) shareOpen = false },
             onShare = { withLanding, withVideo ->
@@ -234,7 +237,7 @@ private fun shownLanding(data: ResultData, picked: Int): Int {
 @Composable
 private fun ShareDialog(
     landingNumber: Int?,
-    videoMb: Double,
+    videoMb: Double?,
     busy: Boolean,
     onDismiss: () -> Unit,
     onShare: (withLanding: Boolean, withVideo: Boolean) -> Unit,
@@ -255,7 +258,11 @@ private fun ShareDialog(
                         enabled = !busy,
                     ) { withLanding = it }
                 }
-                ShareOption("The video clip", "%.0f MB".format(videoMb.coerceAtLeast(1.0)), withVideo, enabled = !busy) { withVideo = it }
+                if (videoMb == null) {
+                    ShareOption("The video clip", "Removed to save space", false, enabled = false) {}
+                } else {
+                    ShareOption("The video clip", "%.0f MB".format(videoMb.coerceAtLeast(1.0)), withVideo, enabled = !busy) { withVideo = it }
+                }
                 Text(
                     "You pick the app it goes to. Stride Lab itself never uploads anything.",
                     style = MaterialTheme.typography.bodySmall,
@@ -309,18 +316,31 @@ private fun ResultContent(
         ),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item {
-            VideoReplay(
-                video = video,
-                aspectRatio = session.videoWidth.toFloat() / session.videoHeight.coerceAtLeast(1),
-                playbackFps = session.playbackFps,
-                pose = data.pose,
-                rawPose = data.rawPose,
-                contactFrames = metrics?.contactFrames.orEmpty(),
-            )
+        val hasVideo = video.exists()
+        if (hasVideo) {
+            item {
+                VideoReplay(
+                    video = video,
+                    aspectRatio = session.videoWidth.toFloat() / session.videoHeight.coerceAtLeast(1),
+                    playbackFps = session.playbackFps,
+                    pose = data.pose,
+                    rawPose = data.rawPose,
+                    contactFrames = metrics?.contactFrames.orEmpty(),
+                )
+            }
+        } else {
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                    Text(
+                        "The video was removed to save space. The results are kept.",
+                        Modifier.padding(16.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
         }
         item { Summary(session, feedback) }
-        if (metrics != null && data.pose != null && metrics.contactFrames.isNotEmpty()) {
+        if (hasVideo && metrics != null && data.pose != null && metrics.contactFrames.isNotEmpty()) {
             item {
                 LandingCard(
                     video = video,

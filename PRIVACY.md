@@ -1,6 +1,6 @@
 # Stride Lab privacy policy
 
-Effective 5 November 2026.
+Effective 7 November 2026.
 
 Stride Lab analyses your running form on your phone. **It has no internet access**: the app doesn't request
 Android's internet permission, so nothing you record can leave your phone through the app. There are no
@@ -14,6 +14,7 @@ All of this is kept in the app's private storage on your phone. Other apps can't
 - **Pose data and results** worked out from each video: body landmark positions, form measurements and coaching comments.
 - **Watch and sensor readings** taken while you record, if you connect a watch or sensor: heart rate, cadence and speed.
   These are health and fitness readings. They're used only to show your stats and compare them with your form.
+- **A crash log**: if the app crashes, the error's technical trace (code locations, the time and your Android version, but no videos or results) is saved so it can be fixed. It's never sent anywhere. You can share it yourself from **About > Storage and crash log**, or clear it there.
 - **Settings**: your height, and the name and Bluetooth address of the watch or sensor you connected, so it can reconnect.
 
 The app turns off Android's cloud backup and device-to-device transfer for its data, so none of it is copied to
@@ -30,6 +31,7 @@ or until Android clears the cache.
 ## Deleting your data
 
 - Delete a clip or a whole run from its screen in the app.
+- Remove old videos but keep their results, or clear the crash log, from **About > Storage and crash log**.
 - **Forget** a connected watch from the watch dialog.
 - Uninstall the app, or clear its storage in Android settings, to remove everything.
 

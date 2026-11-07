@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.atsukio.runningcoach.audio.Metronome
+import com.atsukio.runningcoach.data.CrashLog
 import com.atsukio.runningcoach.data.RunRecorder
 import com.atsukio.runningcoach.sensors.SensorHub
 import com.atsukio.runningcoach.ui.CoachApp
@@ -20,6 +21,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CrashLog.install(this)
         enableEdgeToEdge()
         setContent {
             CoachTheme {

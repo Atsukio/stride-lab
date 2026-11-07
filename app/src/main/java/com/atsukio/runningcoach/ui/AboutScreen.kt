@@ -11,6 +11,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -23,6 +24,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
@@ -35,7 +37,7 @@ import kotlinx.coroutines.withContext
 /** App version, privacy summary, and the open-source licences the app has to ship. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AboutScreen(onBack: () -> Unit) {
+fun AboutScreen(onBack: () -> Unit, onOpenStorage: () -> Unit) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val version = remember {
@@ -75,6 +77,9 @@ fun AboutScreen(onBack: () -> Unit) {
                     "Source code and privacy policy: github.com/Atsukio/stride-lab",
                 style = MaterialTheme.typography.bodySmall,
             )
+            OutlinedButton(onClick = onOpenStorage, modifier = Modifier.fillMaxWidth()) {
+                Text("Storage and crash log")
+            }
             HorizontalDivider()
             Text("Open-source licences", style = MaterialTheme.typography.titleMedium)
             Text(licences, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
