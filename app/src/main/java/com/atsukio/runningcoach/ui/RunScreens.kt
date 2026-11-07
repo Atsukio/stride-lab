@@ -29,6 +29,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -37,6 +38,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -57,7 +59,10 @@ import com.atsukio.runningcoach.analysis.Coach
 import com.atsukio.runningcoach.analysis.GaitMetrics
 import com.atsukio.runningcoach.analysis.RunClip
 import com.atsukio.runningcoach.analysis.RunInsights
+import com.atsukio.runningcoach.audio.SpokenCues
+import com.atsukio.runningcoach.audio.CueSchedule
 import com.atsukio.runningcoach.data.RunRecorder
+import com.atsukio.runningcoach.data.CoachSettings
 import com.atsukio.runningcoach.data.Session
 import com.atsukio.runningcoach.data.SessionRepository
 import com.atsukio.runningcoach.data.WholeRun
@@ -116,6 +121,21 @@ fun RunScreen(
         clips = withContext(Dispatchers.IO) { clipsOf(repo, current.id) }
     }
 
+    // Spoken cues: the phone's own offline voice says the focus cue after a minute, then every five minutes.
+    val settings = remember { CoachSettings(context) }
+    var spoken by remember { mutableStateOf(settings.spokenCues) }
+    val voice = remember { SpokenCues(context) }
+    DisposableEffect(voice) { onDispose { voice.shutdown() } }
+    var lastCue by remember { mutableIntStateOf(CueSchedule.dueIndex(elapsedSec)) }
+    val due = CueSchedule.dueIndex(elapsedSec)
+    LaunchedEffect(due, spoken, voice.offlineVoiceReady) {
+        if (!spoken || !voice.offlineVoiceReady || due <= lastCue) return@LaunchedEffect
+        lastCue = due
+        val latest = clips.lastOrNull { it.metrics != null }
+        val feedback = latest?.metrics?.let { Coach.review(it, latest.speedKmh) }.orEmpty()
+        CueSchedule.cue(settings.focusPlan, feedback)?.let { voice.speak(it) }
+    }
+
     val view = LocalView.current
     DisposableEffect(Unit) {
         view.keepScreenOn = true
@@ -152,7 +172,7 @@ fun RunScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            item { Text(formatDuration(elapsedSec), style = MaterialTheme.typography.displayLarge) }
+            item { Text(formatDuration(elapsedSec), style = monoValue(56)) }
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     StatBox("Heart rate", stats?.heartRate?.let { "$it" } ?: "–")
@@ -162,6 +182,36 @@ fun RunScreen(
             }
             item { LiveStatsChip() }
             item { MetronomeControl() }
+            item {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Spoken cues", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            if (voice.offlineVoiceReady) {
+                                "Says your focus cue after a minute, then every 5 minutes, in the phone's own voice."
+                            } else {
+                                "This phone has no offline voice installed, so cues stay silent. Nothing is ever sent online."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = spoken && voice.offlineVoiceReady,
+                        onCheckedChange = {
+                            spoken = it
+                            settings.spokenCues = it
+                            // Start from the current cue number so turning it on doesn't speak at once.
+                            lastCue = due
+                        },
+                        enabled = voice.offlineVoiceReady,
+                    )
+                }
+            }
             item {
                 val lastOffset = clips.mapNotNull { it.runOffsetSec }.maxOrNull()
                 val hint = if (lastOffset == null) {

@@ -1,6 +1,7 @@
 package com.atsukio.runningcoach.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavType
@@ -8,6 +9,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.atsukio.runningcoach.OpenRequests
 import com.atsukio.runningcoach.data.CoachSettings
 import com.atsukio.runningcoach.data.RunRecorder
 
@@ -19,6 +21,14 @@ fun CoachApp() {
     val context = LocalContext.current
     val runRecorder = remember { RunRecorder.get(context) }
     val settings = remember { CoachSettings(context) }
+    // A notification for a finished analysis opens its result.
+    val openRequest = OpenRequests.sessionId
+    LaunchedEffect(openRequest) {
+        if (openRequest != null && nav.currentDestination != null) {
+            OpenRequests.sessionId = null
+            nav.navigate("result/$openRequest")
+        }
+    }
     // First launch opens the setup guide; after that it's a tap away on the home screen.
     NavHost(navController = nav, startDestination = if (settings.guideSeen) "home" else "guide") {
         composable("guide") {
@@ -40,6 +50,7 @@ fun CoachApp() {
                 onOpenAbout = { nav.navigate("about") },
                 onOpenTrends = { nav.navigate("trends") },
                 onOpenGuide = { nav.navigate("guide") },
+                onOpenAnalysis = { id, reanalyse -> nav.navigate("analyse/$id?reanalyse=$reanalyse") },
             )
         }
         composable("run") {
@@ -100,6 +111,10 @@ fun CoachApp() {
                     }
                 },
                 onCancel = { nav.popBackStack() },
+                onBackground = {
+                    // Back to the home screen (or the run screen during a whole run); the analysis carries on.
+                    if (!nav.popBackStack("run", inclusive = false)) nav.popBackStack("home", inclusive = false)
+                },
             )
         }
         composable("result/{id}") { entry ->

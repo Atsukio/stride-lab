@@ -15,6 +15,7 @@ All of this is kept in the app's private storage on your phone. Other apps can't
 - **Watch and sensor readings** taken while you record, if you connect a watch or sensor: heart rate, cadence and speed.
   These are health and fitness readings. They're used only to show your stats and compare them with your form.
 - **A crash log**: if the app crashes, the error's technical trace (code locations, the time and your Android version, but no videos or results) is saved so it can be fixed. It's never sent anywhere. You can share it yourself from **About > Storage and crash log**, or clear it there.
+- **Spoken cues** (off by default): if you turn them on during a whole run, a short coaching phrase is spoken by the phone's own text-to-speech. The app only uses voices that work without a network, and stores nothing from it.
 - **Settings**: your height, and the name and Bluetooth address of the watch or sensor you connected, so it can reconnect.
 
 The app turns off Android's cloud backup and device-to-device transfer for its data, so none of it is copied to
@@ -41,6 +42,7 @@ or until Android clears the cache.
 |---|---|
 | Camera | To film your running. |
 | Nearby devices (Bluetooth scan and connect) | To find and connect to your watch, heart-rate strap or foot pod. Scanning is declared as not used to work out your location. |
+| Notifications (Android 13 and later) and a foreground service | So a clip keeps being analysed when you leave the app, with a progress notification and a "ready" notification. The notifications show only a percentage and a message, and are never sent anywhere. |
 | Location (Android 11 and older only) | Android requires it on these versions to scan for Bluetooth devices. The app never reads your location. |
 
 Importing a video uses Android's photo picker, which gives the app only the video you choose.

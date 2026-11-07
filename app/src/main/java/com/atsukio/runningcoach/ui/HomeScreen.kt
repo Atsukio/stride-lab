@@ -55,6 +55,9 @@ import com.atsukio.runningcoach.R
 import com.atsukio.runningcoach.analysis.Coach
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.atsukio.runningcoach.data.CoachSettings
+import com.atsukio.runningcoach.data.AnalysisRunner
+import com.atsukio.runningcoach.data.AnalysisState
+import com.atsukio.runningcoach.data.AnalysisTask
 import com.atsukio.runningcoach.data.RunRecorder
 import com.atsukio.runningcoach.data.Session
 import com.atsukio.runningcoach.data.SessionRepository
@@ -88,6 +91,7 @@ fun HomeScreen(
     onOpenAbout: () -> Unit,
     onOpenTrends: () -> Unit,
     onOpenGuide: () -> Unit,
+    onOpenAnalysis: (id: String, reanalyse: Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     val repo = remember { SessionRepository(context) }
@@ -96,8 +100,12 @@ fun HomeScreen(
     var items by remember { mutableStateOf<List<HomeItem>?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var plan by remember { mutableStateOf(settings.focusPlan) }
+    val runner = remember { AnalysisRunner.get(context) }
+    val analyses by runner.tasks.collectAsStateWithLifecycle()
+    // Bumped when a background analysis finishes, so the history picks up the new clip.
+    var reload by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(reload) {
         items = withContext(Dispatchers.IO) {
             repo.deleteAbandoned()
             val sessions = repo.list()
@@ -157,6 +165,18 @@ fun HomeScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                items(analyses.values.toList(), key = { "analysis-${it.sessionId}" }) { task ->
+                    AnalysisTaskCard(
+                        task = task,
+                        onOpen = { onOpenAnalysis(task.sessionId, task.reanalyse) },
+                        onShowResult = {
+                            runner.dismiss(task.sessionId)
+                            onOpenSession(task.sessionId)
+                        },
+                        onDismiss = { runner.cancel(task.sessionId) },
+                        onDone = { reload++ },
+                    )
+                }
                 item { RecordHero(onRecord = onNewAnalysis) }
                 val analysed = list.filterIsInstance<HomeItem.Clip>().map { it.session }.filter { it.metrics != null }
                 plan?.let { active ->
@@ -328,6 +348,45 @@ private fun PlanCard(plan: FocusPlan, clips: List<PlanClip>, onCheckIn: () -> Un
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (!progress.reachedGoal) Button(onClick = onCheckIn) { Text("Film a check-in") }
                 OutlinedButton(onClick = onEnd) { Text(if (progress.finished) "Finish plan" else "End plan") }
+            }
+        }
+    }
+}
+
+/** A clip being analysed in the background, or one that has just finished or failed. */
+@Composable
+private fun AnalysisTaskCard(
+    task: AnalysisTask,
+    onOpen: () -> Unit,
+    onShowResult: () -> Unit,
+    onDismiss: () -> Unit,
+    onDone: () -> Unit,
+) {
+    val state by task.state.collectAsStateWithLifecycle()
+    LaunchedEffect(state is AnalysisState.Done) { if (state is AnalysisState.Done) onDone() }
+    val done = state is AnalysisState.Done
+    LabCard(onClick = if (done) onShowResult else onOpen, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            when (val s = state) {
+                is AnalysisState.Running -> {
+                    SectionLabel("Analysing in the background")
+                    LinearProgressIndicator(progress = { s.progress }, modifier = Modifier.fillMaxWidth())
+                    Text("${(s.progress * 100).roundToInt()}%. Tap to watch.", style = MaterialTheme.typography.bodyMedium)
+                }
+                AnalysisState.Measuring -> {
+                    SectionLabel("Analysing in the background")
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Text("Measuring your form. Tap to watch.", style = MaterialTheme.typography.bodyMedium)
+                }
+                is AnalysisState.Done -> {
+                    SectionLabel("Ready", colour = signalColour(true))
+                    Text("Your analysis is ready. Tap to see it.", style = MaterialTheme.typography.titleMedium)
+                }
+                is AnalysisState.Error -> {
+                    SectionLabel("Couldn't analyse", colour = signalColour(false))
+                    Text(s.message, style = MaterialTheme.typography.bodyMedium)
+                    OutlinedButton(onClick = onDismiss) { Text("Dismiss") }
+                }
             }
         }
     }

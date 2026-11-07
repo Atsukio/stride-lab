@@ -34,6 +34,16 @@ class CoachSettings(context: Context) {
         get() = prefs.getBoolean(KEY_GUIDE_SEEN, false)
         set(value) = prefs.edit { putBoolean(KEY_GUIDE_SEEN, value) }
 
+    /** Whether the notification permission prompt has been shown once. */
+    var askedNotifications: Boolean
+        get() = prefs.getBoolean(KEY_ASKED_NOTIFICATIONS, false)
+        set(value) = prefs.edit { putBoolean(KEY_ASKED_NOTIFICATIONS, value) }
+
+    /** Speak the focus cue now and then during a whole run, using an offline voice. */
+    var spokenCues: Boolean
+        get() = prefs.getBoolean(KEY_SPOKEN, false)
+        set(value) = prefs.edit { putBoolean(KEY_SPOKEN, value) }
+
     /** The focus plan being followed, if any. */
     var focusPlan: FocusPlan?
         get() = prefs.getString(KEY_PLAN, null)?.let { runCatching { Json.decodeFromString<FocusPlan>(it) }.getOrNull() }
@@ -55,6 +65,8 @@ class CoachSettings(context: Context) {
         val RECORD_OPTIONS = listOf(10, 15, 20, 30)
         val METRONOME_RANGE = 140..210
         private const val DEFAULT_METRONOME_SPM = 170
+        private const val KEY_ASKED_NOTIFICATIONS = "asked_notifications"
+        private const val KEY_SPOKEN = "spoken_cues"
         private const val KEY_PLAN = "focus_plan"
         private const val KEY_APPEARANCE = "appearance"
         private const val KEY_METRONOME = "metronome_spm"

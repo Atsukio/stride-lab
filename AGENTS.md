@@ -49,6 +49,13 @@ machine points at JDK 17. App code targets Java 17. compileSdk and targetSdk are
   Shut it down afterwards with `adb emu kill`.
 - Real-device behaviour (camera, 60 fps, GPU delegate, heat, Bluetooth) can't be checked on the emulator. Say so
   rather than claiming it works.
+- **Pose detection cannot run on the emulator at all**: the AVD is x86_64 and MediaPipe ships ARM libraries only.
+  Analysis ends in the "processor can't run pose detection" error there. That is expected; it still exercises the
+  runner, notifications and Home. Anything involving real poses needs the Pixel, and installing there needs the user's say-so.
+- Android shell paths get mangled by Git Bash: run adb with `MSYS_NO_PATHCONV=1`. To skip the first-run guide on
+  the emulator, write `guide_seen` into `shared_prefs/settings.xml` with `adb shell run-as com.atsukio.runningcoach`.
+- A shell heredoc containing Kotlin or Python with quotes can fail to parse. Write the script with the Write tool
+  and run it instead.
 
 ## Code map
 
@@ -59,9 +66,10 @@ app/src/main/java/com/atsukio/runningcoach/
              LandingAnnotation
   pose/      MediaPipe extraction: PoseExtractor (decoder + two-pass), LivePoseAnalyzer (analyse while
              recording), LiveAlignment (matches live frames to the saved video), GpuCheck, FrameTiming, Yuv
-  data/      Session (kotlinx.serialization), SessionRepository (app-private files), CoachSettings, RunRecorder
+  data/      Session (kotlinx.serialization), SessionRepository (app-private files), CoachSettings, RunRecorder,
+             AnalysisRunner (analyses run app-wide, not per screen), CrashLog
   sensors/   Bluetooth heart-rate and running speed/cadence sensors (GATT parsers, SensorHub)
-  audio/     Metronome
+  audio/     Metronome, SpokenCues (offline text-to-speech) and CueSchedule
   share/     ShareSummary (text), ShareCard (image drawn off-screen), ResultSharer (FileProvider + share sheet)
   ui/        Compose Material 3 screens. CoachApp holds navigation; ResultVisuals holds the shared drawing helpers
 ```

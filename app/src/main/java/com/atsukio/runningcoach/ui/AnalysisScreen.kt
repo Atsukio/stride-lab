@@ -1,6 +1,13 @@
 package com.atsukio.runningcoach.ui
 
 import android.app.Application
+import com.atsukio.runningcoach.data.AnalysisState
+import com.atsukio.runningcoach.data.AnalysisRunner
+import kotlinx.coroutines.flow.StateFlow
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.os.Build
+import android.Manifest
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
@@ -31,131 +38,36 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.atsukio.runningcoach.analysis.CrossCheck
-import com.atsukio.runningcoach.analysis.GaitAnalyzer
-import com.atsukio.runningcoach.analysis.GaitResult
 import com.atsukio.runningcoach.data.CoachSettings
-import com.atsukio.runningcoach.data.Session
-import com.atsukio.runningcoach.data.SessionRepository
-import com.atsukio.runningcoach.pose.GpuCheck
-import com.atsukio.runningcoach.pose.LiveResults
-import com.atsukio.runningcoach.pose.PoseExtractor
-import com.atsukio.runningcoach.pose.VideoInfo
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
-sealed interface AnalysisState {
-    data class Running(val progress: Float) : AnalysisState
-    data object Measuring : AnalysisState
-    data class Done(val runId: String?, val liveProblems: List<String> = emptyList()) : AnalysisState
-    data class Error(val message: String) : AnalysisState
-}
-
+/** A thin view model: the analysis itself runs in [AnalysisRunner], so it carries on without this screen. */
 class AnalysisViewModel(app: Application, handle: SavedStateHandle) : AndroidViewModel(app) {
     val sessionId: String = checkNotNull(handle["id"])
 
     /** Re-running an existing clip: it keeps its date and isn't deleted if cancelled. */
     private val reanalyse: Boolean = handle["reanalyse"] ?: false
-    private val repo = SessionRepository(app)
-    private val _state = MutableStateFlow<AnalysisState>(AnalysisState.Running(0f))
-    val state = _state.asStateFlow()
+    private val runner = AnalysisRunner.get(app)
+    private val task = runner.start(sessionId, reanalyse)
+
+    val state: StateFlow<AnalysisState> = task.state
 
     /** When analysis started, on the [SystemClock.elapsedRealtime] clock, for the elapsed-time display. */
-    val startedAtMs = SystemClock.elapsedRealtime()
+    val startedAtMs = task.startedAtMs
 
-    private val job = viewModelScope.launch { run() }
+    fun cancel() = runner.cancel(sessionId)
 
-    private suspend fun run() {
-        try {
-            var info: VideoInfo? = null
-            var lastPercent = -1
-            val app = getApplication<Application>()
-            val video = repo.videoFile(sessionId)
-            GpuCheck.ensureChecked(app, video)
-            val useGpu = GpuCheck.shouldUseGpu(app, CoachSettings(app).useGpu)
-            // Live poses found on a GPU that has since failed the check aren't trusted.
-            val live = LiveResults.take(sessionId)?.takeIf { useGpu || !it.usedGpu }
-            val extraction = PoseExtractor(app, useGpu = useGpu).extract(
-                video,
-                live = live,
-                onInfo = { info = it },
-            ) { progress ->
-                val percent = (progress * 100).roundToInt()
-                if (percent != lastPercent) {
-                    lastPercent = percent
-                    _state.value = AnalysisState.Running(progress)
-                }
-            }
-            val track = extraction.track
-            _state.value = AnalysisState.Measuring
-            val heightCm = CoachSettings(getApplication()).runnerHeightCm
-            val existingCreatedAt = if (reanalyse) withContext(Dispatchers.IO) { repo.get(sessionId)?.createdAt } else null
-            val capture = withContext(Dispatchers.IO) {
-                repo.savePose(sessionId, track)
-                val capture = repo.loadCaptureInfo(sessionId)
-                val result = GaitAnalyzer.analyze(track, heightCm, beltSpeedKmh = capture.speedKmh)
-                val success = result as? GaitResult.Success
-                val watchScaleNote = if (success?.metrics?.scaledFromTreadmill == true && capture.speedFromSensor) {
-                    "Distances were scaled from your watch's pace. Typing the treadmill's own speed is more accurate."
-                } else {
-                    null
-                }
-                val videoCadence = success?.metrics?.cadenceSpm
-                val watchCadence = capture.sensor?.cadenceSpm
-                val crossCheck = if (videoCadence != null && watchCadence != null) {
-                    CrossCheck.cadence(videoCadence, watchCadence)
-                } else {
-                    null
-                }
-                repo.save(
-                    Session(
-                        id = sessionId,
-                        createdAt = existingCreatedAt ?: System.currentTimeMillis(),
-                        speedKmh = capture.speedKmh,
-                        speedFromSensor = capture.speedFromSensor,
-                        runnerHeightCm = heightCm,
-                        fps = track.fps,
-                        playbackFps = info?.playbackFps ?: track.fps,
-                        videoWidth = track.width,
-                        videoHeight = track.height,
-                        metrics = success?.metrics,
-                        warnings = success?.warnings.orEmpty() + extraction.notes + listOfNotNull(crossCheck, watchScaleNote),
-                        failure = (result as? GaitResult.Failure)?.reason,
-                        sensor = capture.sensor,
-                        runId = capture.runId,
-                        runOffsetSec = capture.runOffsetSec,
-                        processingSec = (SystemClock.elapsedRealtime() - startedAtMs) / 1000.0,
-                        analysedLive = extraction.usedLive,
-                    ),
-                )
-                capture
-            }
-            _state.value = AnalysisState.Done(capture.runId, extraction.liveProblems)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            _state.value = AnalysisState.Error(e.message ?: "Something went wrong while analysing the video.")
-        }
-    }
-
-    fun cancel() {
-        job.cancel()
-        if (!reanalyse) repo.delete(sessionId)
-    }
+    /** The screen has been shown the outcome, so the runner can forget it. */
+    fun finish() = runner.dismiss(sessionId)
 }
 
 @Composable
 fun AnalysisScreen(
     onFinished: (id: String, runId: String?) -> Unit,
     onCancel: () -> Unit,
+    onBackground: () -> Unit,
     viewModel: AnalysisViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -171,7 +83,19 @@ fun AnalysisScreen(
     val done = state as? AnalysisState.Done
     val askAboutLive = done != null && done.liveProblems.isNotEmpty() && settings.liveAnalysis && !askedAboutLive
     LaunchedEffect(done, askAboutLive) {
-        if (done != null && !askAboutLive) onFinished(viewModel.sessionId, done.runId)
+        if (done != null && !askAboutLive) {
+            viewModel.finish()
+            onFinished(viewModel.sessionId, done.runId)
+        }
+    }
+
+    // Android 13 and later ask before showing the progress notification. Asked once; analysis works either way.
+    val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= 33 && !settings.askedNotifications) {
+            settings.askedNotifications = true
+            askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
     if (askAboutLive) {
         AlertDialog(
@@ -212,6 +136,12 @@ fun AnalysisScreen(
                         style = MaterialTheme.typography.bodySmall,
                         textAlign = TextAlign.Center,
                     )
+                    Text(
+                        "You can leave this screen or the app. It keeps going and tells you when it's ready.",
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                    )
+                    Button(onClick = onBackground) { Text("Keep going in the background") }
                     OutlinedButton(onClick = cancel) { Text("Cancel") }
                 }
                 AnalysisState.Measuring, is AnalysisState.Done -> {
@@ -220,6 +150,7 @@ fun AnalysisScreen(
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                     Text("Measuring your form…", style = MaterialTheme.typography.titleMedium)
                     ElapsedTime(viewModel.startedAtMs)
+                    Button(onClick = onBackground) { Text("Keep going in the background") }
                 }
                 is AnalysisState.Error -> {
                     Text("Couldn't analyse this video", style = MaterialTheme.typography.titleMedium)

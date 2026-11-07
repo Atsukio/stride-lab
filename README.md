@@ -47,6 +47,11 @@ Everything runs on the phone: there is no internet permission, no cloud service,
   size (`analysis/GhostAligner.kt`), so differences in form show.
 - **Focus plan:** start a three-week plan from a result's main focus. Home shows the day, the cue and drill, and how
   your latest check-in clip measured up (`analysis/FocusPlan.kt`).
+- **Background analysis:** leave the screen or the app while a clip is analysed. A progress notification shows
+  while it runs and another says when it's ready (`data/AnalysisRunner.kt`, `AnalysisService.kt`). Home shows
+  clips still being analysed.
+- **Spoken cues:** optional, during a whole run, the phone's own offline voice says your focus cue after a minute
+  and then every five minutes (`audio/SpokenCues.kt`). Nothing is sent online; with no offline voice it stays silent.
 - **Appearance:** a dark "lab" look by default, with light and system options in Settings.
 - **Storage:** remove old videos but keep their results; a local crash log you can share yourself.
 - **Share results** from the results screen: a summary image of every measurement, optionally with an annotated
