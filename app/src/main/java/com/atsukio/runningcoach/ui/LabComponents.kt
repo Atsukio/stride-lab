@@ -101,12 +101,16 @@ fun ViewfinderPanel(modifier: Modifier = Modifier, content: @Composable () -> Un
 fun ScanPanel(modifier: Modifier = Modifier) {
     val line = MaterialTheme.colorScheme.primary
     val grid = MaterialTheme.colorScheme.outlineVariant
-    val sweep by rememberInfiniteTransition(label = "scan").animateFloat(
+    // One loop from 0 to 2: the first half sweeps right, the second half sweeps back left. Unlike a reversing
+    // animation, this says which way the line is moving, so the trail can stay behind it.
+    val loop by rememberInfiniteTransition(label = "scan").animateFloat(
         initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1800, easing = LinearEasing), RepeatMode.Reverse),
+        targetValue = 2f,
+        animationSpec = infiniteRepeatable(tween(3600, easing = LinearEasing), RepeatMode.Restart),
         label = "sweep",
     )
+    val movingRight = loop <= 1f
+    val sweep = if (movingRight) loop else 2f - loop
     Canvas(
         modifier
             .fillMaxWidth()
@@ -128,7 +132,8 @@ fun ScanPanel(modifier: Modifier = Modifier) {
         val scanX = sweep * size.width
         // A soft trail behind the line.
         for (i in 1..12) {
-            val dx = i * 3.dp.toPx()
+            // Behind the line: to its left when moving right, to its right when moving left.
+            val dx = i * 3.dp.toPx() * (if (movingRight) 1f else -1f)
             drawLine(line.copy(alpha = 0.12f * (13 - i) / 12f), Offset(scanX - dx, 0f), Offset(scanX - dx, size.height), strokeWidth = 3.dp.toPx())
         }
         drawLine(line, Offset(scanX, 0f), Offset(scanX, size.height), strokeWidth = 2.dp.toPx())
