@@ -112,6 +112,9 @@ app/src/main/java/com/atsukio/runningcoach/
 - The share FileProvider exposes only `cacheDir/shared/`, and that folder is cleared on each share. Keep it that way.
 - The setup diagram must clearly show the camera **side-on** to the runner, never facing them.
 - `MediaMetadataRetriever` frame grabs are slow. Do them off the main thread (`Dispatchers.IO`).
+- Lint's `ObsoleteSdkInt` warning on `res/mipmap-anydpi-v26` is a false positive. The adaptive icon must stay in that
+  folder: moving `ic_launcher.xml` to `mipmap-anydpi` fails the build with "resource mipmap/ic_launcher not found".
+  Leave it, and don't count it as a new warning.
 
 ## Design system
 
