@@ -3,6 +3,7 @@ package com.atsukio.runningcoach.ui
 import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -88,11 +89,12 @@ fun LiveStatsChip(modifier: Modifier = Modifier) {
     Surface(
         onClick = { showDialog = true },
         shape = RoundedCornerShape(50),
-        color = Color.Black.copy(alpha = 0.5f),
+        color = Color(0xFF0B1210).copy(alpha = 0.75f),
         contentColor = Color.White,
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
         modifier = modifier,
     ) {
-        Text(text, Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.labelLarge)
+        Text(text, Modifier.padding(horizontal = 12.dp, vertical = 6.dp), style = MaterialTheme.typography.labelMedium)
     }
     if (showDialog) SensorDialog(onDismiss = { showDialog = false })
 }

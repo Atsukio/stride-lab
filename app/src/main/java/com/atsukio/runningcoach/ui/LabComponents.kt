@@ -1,6 +1,18 @@
 package com.atsukio.runningcoach.ui
 
 import androidx.compose.animation.core.LinearEasing
+import java.util.Locale
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -46,7 +58,13 @@ fun StatusDot(good: Boolean?, modifier: Modifier = Modifier) {
 
 /** A compact readout: a figure in monospace with a quiet unit, e.g. "172" and "spm". */
 @Composable
-fun StatChip(value: String, unit: String?, modifier: Modifier = Modifier, colour: Color = MaterialTheme.colorScheme.onSurface) {
+fun StatChip(
+    value: String,
+    unit: String?,
+    modifier: Modifier = Modifier,
+    colour: Color = MaterialTheme.colorScheme.onSurface,
+    countUp: Boolean = false,
+) {
     Row(
         modifier
             .clip(RoundedCornerShape(8.dp))
@@ -55,7 +73,7 @@ fun StatChip(value: String, unit: String?, modifier: Modifier = Modifier, colour
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        Text(value, style = monoValue(14), color = colour)
+        if (countUp) CountUpText(value, monoValue(14), colour) else Text(value, style = monoValue(14), color = colour)
         if (unit != null) Text(unit, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
@@ -138,4 +156,46 @@ fun ScanPanel(modifier: Modifier = Modifier) {
         }
         drawLine(line, Offset(scanX, 0f), Offset(scanX, size.height), strokeWidth = 2.dp.toPx())
     }
+}
+
+private val LEADING_NUMBER = Regex("^(-?\\d+(?:\\.\\d+)?)(.*)$", RegexOption.DOT_MATCHES_ALL)
+
+/**
+ * Text that begins with a figure, counting up to it the first time it appears, e.g. "27 cm ahead of hips" counts
+ * from 0 to 27. Monospace digits keep the text from jiggling as it counts. It plays once per screen visit, even
+ * when a list scrolls the item away and back, and it jumps straight to the answer when animations are off. Text
+ * without a leading figure is shown as it is, and screen readers always get the final text.
+ */
+@Composable
+fun CountUpText(
+    text: String,
+    style: TextStyle,
+    colour: Color,
+    modifier: Modifier = Modifier,
+    textAlign: TextAlign? = null,
+    durationMs: Int = 700,
+) {
+    val match = remember(text) { LEADING_NUMBER.matchEntire(text) }
+    var played by rememberSaveable(text) { mutableStateOf(false) }
+    val progress = remember(text) { Animatable(if (played || match == null) 1f else 0f) }
+    LaunchedEffect(text) {
+        if (!played && match != null) {
+            progress.animateTo(1f, tween(durationMs, easing = FastOutSlowInEasing))
+        }
+        played = true
+    }
+    val shown = if (match == null || progress.value >= 1f) {
+        text
+    } else {
+        val target = match.groupValues[1]
+        val decimals = target.substringAfter('.', "").length
+        "%.${decimals}f".format(Locale.US, target.toDouble() * progress.value) + match.groupValues[2]
+    }
+    Text(
+        shown,
+        modifier.semantics { contentDescription = text },
+        color = colour,
+        style = style,
+        textAlign = textAlign,
+    )
 }

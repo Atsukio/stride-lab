@@ -6,6 +6,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -172,63 +174,64 @@ fun RunScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            item { Text(formatDuration(elapsedSec), style = monoValue(56)) }
+            item { RunTimerHero(elapsedSec) }
             item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    StatBox("Heart rate", stats?.heartRate?.let { "$it" } ?: "–")
-                    StatBox("Cadence", stats?.cadenceSpm?.takeIf { it > 0 }?.let { "$it" } ?: "–")
-                    StatBox("Pace", stats?.speedMps?.takeIf { it > 0.3 }?.let { formatPace(it).removeSuffix(" /km") } ?: "–")
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StatTile("Heart rate", stats?.heartRate?.let { "$it" } ?: "–", "bpm", Modifier.weight(1f), HeartRateColor)
+                    StatTile("Cadence", stats?.cadenceSpm?.takeIf { it > 0 }?.let { "$it" } ?: "–", "spm", Modifier.weight(1f))
+                    StatTile(
+                        "Pace",
+                        stats?.speedMps?.takeIf { it > 0.3 }?.let { formatPace(it).removeSuffix(" /km") } ?: "–",
+                        "/km",
+                        Modifier.weight(1f),
+                    )
                 }
             }
             item { LiveStatsChip() }
-            item { MetronomeControl() }
             item {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Spoken cues", style = MaterialTheme.typography.titleSmall)
-                        Text(
-                            if (voice.offlineVoiceReady) {
-                                "Says your focus cue after a minute, then every 5 minutes, in the phone's own voice."
-                            } else {
-                                "This phone has no offline voice installed, so cues stay silent. Nothing is ever sent online."
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                LabCard(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        MetronomeControl()
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Spoken cues", style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    if (voice.offlineVoiceReady) {
+                                        "Says your focus cue after a minute, then every 5 minutes, in the phone's own voice."
+                                    } else {
+                                        "This phone has no offline voice installed, so cues stay silent. Nothing is ever sent online."
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Switch(
+                                checked = spoken && voice.offlineVoiceReady,
+                                onCheckedChange = {
+                                    spoken = it
+                                    settings.spokenCues = it
+                                    // Start from the current cue number so turning it on doesn't speak at once.
+                                    lastCue = due
+                                },
+                                enabled = voice.offlineVoiceReady,
+                            )
+                        }
                     }
-                    Switch(
-                        checked = spoken && voice.offlineVoiceReady,
-                        onCheckedChange = {
-                            spoken = it
-                            settings.spokenCues = it
-                            // Start from the current cue number so turning it on doesn't speak at once.
-                            lastCue = due
-                        },
-                        enabled = voice.offlineVoiceReady,
-                    )
                 }
             }
             item {
                 val lastOffset = clips.mapNotNull { it.runOffsetSec }.maxOrNull()
-                val hint = if (lastOffset == null) {
-                    "Take your first clip once you've warmed up, about 5 minutes in."
-                } else {
-                    "Next clip suggested at ${formatDuration(lastOffset + SUGGESTED_CLIP_INTERVAL_SEC)}."
-                }
-                Text(
-                    "$hint A Bluetooth camera remote starts a clip from here.",
-                    textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                NextClipCard(elapsedSec, lastOffset)
             }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(onClick = { onTakeClip(false) }) { Text("Take a clip") }
-                    OutlinedButton(onClick = { confirmFinish = true }) { Text("Finish run") }
+                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { onTakeClip(false) }, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Take a clip") }
+                    OutlinedButton(onClick = { confirmFinish = true }, modifier = Modifier.fillMaxWidth()) { Text("Finish run") }
                 }
             }
             if (clips.isNotEmpty()) {
@@ -440,34 +443,74 @@ private fun TrendChart(
     }
 }
 
+/** The run's clock, large, in a viewfinder panel. */
 @Composable
-private fun StatBox(label: String, value: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, style = MaterialTheme.typography.headlineMedium)
-        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun RunTimerHero(elapsedSec: Double) {
+    ViewfinderPanel {
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+            SectionLabel("Run in progress")
+            Text(formatDuration(elapsedSec), style = monoValue(64), modifier = Modifier.padding(top = 4.dp))
+        }
+    }
+}
+
+/** One live reading: a label, a large monospace figure and its unit. */
+@Composable
+private fun StatTile(label: String, value: String, unit: String, modifier: Modifier, colour: Color = Color.Unspecified) {
+    LabCard(modifier) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            SectionLabel(label, colour = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = monoValue(28), color = if (colour == Color.Unspecified) MaterialTheme.colorScheme.onSurface else colour)
+            Text(unit, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** When to take the next clip: how far through the warm-up, or through the gap since the last clip. */
+@Composable
+private fun NextClipCard(elapsedSec: Double, lastOffsetSec: Double?) {
+    val warmUpSec = 5 * 60.0
+    val (progress, message) = if (lastOffsetSec == null) {
+        (elapsedSec / warmUpSec) to
+            if (elapsedSec >= warmUpSec) "You're warmed up. Take your first clip whenever you're ready." else "Warm up first: take your first clip at about 5 minutes."
+    } else {
+        ((elapsedSec - lastOffsetSec) / SUGGESTED_CLIP_INTERVAL_SEC) to
+            "Next clip suggested at ${formatDuration(lastOffsetSec + SUGGESTED_CLIP_INTERVAL_SEC)}."
+    }
+    LabCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionLabel("Next clip")
+            LinearProgressIndicator(progress = { progress.toFloat().coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+            Text(message, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "A Bluetooth camera remote starts a clip from here.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
 @Composable
 private fun ClipRow(session: Session, onClick: () -> Unit) {
     val metrics = session.metrics
-    val summary = if (metrics == null) {
-        "Couldn't analyse this clip"
-    } else {
-        listOfNotNull(
-            metrics.cadenceSpm?.let { "${it.roundToInt()} spm" },
-            metrics.overstrideCm?.let { "overstride ${it.roundToInt()} cm" },
-            session.sensor?.heartRate?.let { "♥ $it" },
-            Coach.mainFocus(Coach.review(metrics, session.speedKmh))?.let { "focus: ${it.topic.lowercase()}" },
-        ).joinToString(" · ")
-    }
+    val focus = metrics?.let { Coach.mainFocus(Coach.review(it, session.speedKmh)) }
     LabCard(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp)) {
-            Text(
-                "At ${formatDuration(session.runOffsetSec ?: 0.0)}",
-                style = MaterialTheme.typography.titleSmall,
-            )
-            Text(summary, style = MaterialTheme.typography.bodyMedium)
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatusDot(if (metrics == null) false else focus == null)
+                Text("At ${formatDuration(session.runOffsetSec ?: 0.0)}", style = MaterialTheme.typography.titleSmall)
+            }
+            if (metrics == null) {
+                Text("Couldn't analyse this clip", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Text(focus?.let { "Focus: ${it.topic.lowercase()}" } ?: "Looking good", style = MaterialTheme.typography.bodyMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    metrics.cadenceSpm?.let { StatChip("${it.roundToInt()}", "spm") }
+                    metrics.overstrideCm?.let { StatChip("${it.roundToInt()}", "cm overstride") }
+                    session.sensor?.heartRate?.let { StatChip("$it", "bpm") }
+                }
+            }
         }
     }
 }

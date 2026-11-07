@@ -452,7 +452,7 @@ private fun Summary(session: Session, feedback: List<Feedback>, plan: FocusPlan?
                 Modifier.padding(top = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                session.metrics?.let { StatChip("${it.stepCount}", "steps") }
+                session.metrics?.let { StatChip("${it.stepCount}", "steps", countUp = true) }
                 session.speedKmh?.let { StatChip(formatSpeed(it), if (session.speedFromSensor) "km/h watch" else "km/h") }
                 StatChip("${session.fps.roundToInt()}", "fps")
             }
@@ -537,10 +537,10 @@ private fun FeedbackCard(item: Feedback, badge: Badge?) {
                     }
                 }
                 // Long values ("14° at landing, 38° max") are set smaller and wrap, so they don't squeeze the title.
-                Text(
+                CountUpText(
                     item.value,
                     style = monoValue(if (item.value.length <= 8) 18 else 14),
-                    color = tint,
+                    colour = tint,
                     textAlign = TextAlign.End,
                     modifier = Modifier.widthIn(max = 190.dp),
                 )

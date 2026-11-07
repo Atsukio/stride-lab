@@ -67,7 +67,8 @@ machine points at JDK 17. App code targets Java 17. compileSdk and targetSdk are
 
 ```
 app/src/main/java/com/atsukio/runningcoach/
-  analysis/  Pure Kotlin, no Android imports. PoseTrack, PoseCleaner (leg swaps, jumps, smoothing),
+  analysis/  Pure Kotlin, no Android imports. PoseTrack, PoseCleaner (leg swaps, jumps, smoothing), LiveStrikeDetector
+             (the landing pulse on the camera preview),
              GaitAnalyzer (landings, metrics), Coach (rules -> Feedback, mainFocus), Framing, RunInsights,
              LandingAnnotation
   pose/      MediaPipe extraction: PoseExtractor (decoder + two-pass), LivePoseAnalyzer (analyse while
@@ -106,6 +107,9 @@ figures. It lives in `ui/Theme.kt` (colours, typography, shapes, `Appearance` se
   `MaterialTheme.colorScheme`, not hex values, so the light theme keeps working.
 - No dynamic (wallpaper) colour: the brand palette is fixed. The share card draws its own always-dark palette in
   `share/ShareCard.kt`; keep the two in step if the palette changes.
+- Motion: `CountUpText` counts a leading figure up once per screen visit (monospace keeps it steady, and it
+  follows the system's animation setting); `ScanPanel` is the analysing animation; `ViewfinderPanel` frames the main
+  call to action. The camera screen is always dark whatever the theme, so it uses fixed dark colours.
 - Check both themes on the emulator (Settings > Appearance) after UI changes. Screenshots: `adb exec-out screencap -p`.
 
 ## Style
@@ -132,7 +136,6 @@ ghost, focus plan, spoken cues, background analysis, instrumented tests.
 
 - Front and rear view analysis (knee collapse, hip drop, crossover). `GaitAnalyzer` rejects those views today; this
   needs different landmarks and metrics, a camera-placement guide, and real footage to check against before it can be trusted.
-- Redesign the capture and run screens fully in the lab style (they inherit the theme but weren't reworked).
 - Pose detection fallback for phones with no ARM libraries (today clips can't be analysed on them).
 - Light-theme pass: screenshots of every screen in light mode.
 - A Play Store release pass using the `android-play-release` skill (version bump, notes, screenshots).

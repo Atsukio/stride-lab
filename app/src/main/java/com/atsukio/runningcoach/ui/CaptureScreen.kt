@@ -26,6 +26,19 @@ import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
+import com.atsukio.runningcoach.analysis.LiveStrikeDetector
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Animatable
+import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -348,6 +361,12 @@ fun CaptureScreen(
         if (hasPermission) {
             AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
             livePreview?.let { LiveSkeleton(it, mirrored = lensFacing == CameraSelector.LENS_FACING_FRONT, Modifier.fillMaxSize()) }
+            ViewfinderMarks(
+                Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .padding(start = 16.dp, end = 16.dp, top = 72.dp, bottom = if (phase == CapturePhase.Idle) 292.dp else 148.dp),
+            )
         } else {
             Column(
                 Modifier.fillMaxSize().padding(32.dp),
@@ -377,17 +396,18 @@ fun CaptureScreen(
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                 when (val p = phase) {
                     is CapturePhase.Recording -> OverlayLabel(
-                        "● 0:%02d / 0:%02d".format(p.seconds, maxSeconds) + if (liveAnalyzer != null) " · analysing" else "",
-                        color = Color(0xFFFF5252),
+                        "REC 0:%02d / 0:%02d".format(p.seconds, maxSeconds) + if (liveAnalyzer != null) " · ANALYSING" else "",
+                        dot = Color(0xFFFF5252),
+                        pulsing = true,
                     )
                     CapturePhase.Idle -> {
                         val advice = livePreview?.let { Framing.check(it.pose, it.brightness) }
                         OverlayLabel(
-                            advice?.message ?: "Side-on · whole body in frame · hip height",
-                            color = when (advice?.good) {
-                                true -> Color(0xFF81C784)
-                                false -> Color(0xFFFFD54F)
-                                null -> Color.White
+                            advice?.message ?: "Side-on · whole body · hip height",
+                            dot = when (advice?.good) {
+                                true -> Signal.Good
+                                false -> Signal.Improve
+                                null -> Color.White.copy(alpha = 0.6f)
                             },
                         )
                     }
@@ -408,9 +428,13 @@ fun CaptureScreen(
         }
 
         (phase as? CapturePhase.Countdown)?.let {
-            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("${it.secondsLeft}", color = Color.White, fontSize = 96.sp, fontWeight = FontWeight.Bold)
-                OverlayLabel("Get running…")
+            Column(
+                Modifier.align(Alignment.Center),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                CountdownRing(it.secondsLeft)
+                OverlayLabel("GET RUNNING")
             }
         }
         if (phase == CapturePhase.Saving) {
@@ -419,7 +443,8 @@ fun CaptureScreen(
 
         Surface(
             modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
-            color = Color.Black.copy(alpha = 0.6f),
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+            color = Color(0xFF0B1210).copy(alpha = 0.82f),
         ) {
             Column(
                 Modifier.navigationBarsPadding().padding(16.dp),
@@ -473,6 +498,7 @@ fun CaptureScreen(
                     RecordButton(
                         phase = phase,
                         enabled = videoCapture != null && phase != CapturePhase.Saving,
+                        progress = (phase as? CapturePhase.Recording)?.let { it.seconds.toFloat() / maxSeconds },
                         onClick = ::onRecordButton,
                     )
                     Box(Modifier.size(width = 96.dp, height = 1.dp))
@@ -484,10 +510,30 @@ fun CaptureScreen(
 
 /**
  * The live pose drawn over the camera preview, which shows the frame fitted to the screen. Points are
- * mirrored for the front camera, whose preview is a mirror image while the analysis frames aren't.
+ * mirrored for the front camera, whose preview is a mirror image while the analysis frames aren't. A ring
+ * pulses at the foot each time it lands, so you can see the app following your stride.
  */
 @Composable
 private fun LiveSkeleton(preview: LivePreview, mirrored: Boolean, modifier: Modifier) {
+    val detector = remember { LiveStrikeDetector() }
+    val pulse = remember { Animatable(1f) }
+    var strike by remember { mutableStateOf<LiveStrikeDetector.Strike?>(null) }
+    var strikes by remember { mutableIntStateOf(0) }
+    // Detecting is quick and never suspends, so each new frame can't cut a running pulse short;
+    // the pulse itself is animated by the effect below, keyed on the landing count.
+    LaunchedEffect(preview) {
+        detector.update(preview.pose, SystemClock.elapsedRealtime())?.let {
+            strike = it
+            strikes++
+        }
+    }
+    LaunchedEffect(strikes) {
+        if (strikes > 0) {
+            pulse.snapTo(0f)
+            pulse.animateTo(1f, tween(400, easing = LinearOutSlowInEasing))
+        }
+    }
+
     val pose = preview.pose ?: return
     Canvas(modifier) {
         val aspect = preview.frameWidth.toFloat() / preview.frameHeight.coerceAtLeast(1)
@@ -495,20 +541,73 @@ private fun LiveSkeleton(preview: LivePreview, mirrored: Boolean, modifier: Modi
         val fitHeight = fitWidth / aspect
         val left = (size.width - fitWidth) / 2
         val top = (size.height - fitHeight) / 2
-        fun point(i: Int): Offset {
-            val x = if (mirrored) 1 - pose.x[i] else pose.x[i]
-            return Offset(left + x * fitWidth, top + pose.y[i] * fitHeight)
+        fun at(nx: Float, ny: Float): Offset {
+            val x = if (mirrored) 1 - nx else nx
+            return Offset(left + x * fitWidth, top + ny * fitHeight)
         }
-        val stroke = 3.dp.toPx()
-        val color = Color.White.copy(alpha = 0.8f)
-        (Landmark.LEFT_CONNECTIONS + Landmark.RIGHT_CONNECTIONS + Landmark.CENTER_CONNECTIONS).forEach { (a, b) ->
-            if (pose.visibility[a] >= 0.5f && pose.visibility[b] >= 0.5f) drawLine(color, point(a), point(b), stroke, StrokeCap.Round)
+        fun point(i: Int) = at(pose.x[i], pose.y[i])
+        val glow = Signal.Good.copy(alpha = 0.22f)
+        val bone = Color(0xFFD9FFF0).copy(alpha = 0.9f)
+        val limbs = (Landmark.LEFT_CONNECTIONS + Landmark.RIGHT_CONNECTIONS + Landmark.CENTER_CONNECTIONS)
+            .filter { (a, b) -> pose.visibility[a] >= 0.5f && pose.visibility[b] >= 0.5f }
+        limbs.forEach { (a, b) -> drawLine(glow, point(a), point(b), 9.dp.toPx(), StrokeCap.Round) }
+        limbs.forEach { (a, b) -> drawLine(bone, point(a), point(b), 2.5.dp.toPx(), StrokeCap.Round) }
+        // Joints as small dots.
+        listOf(
+            Landmark.LEFT_SHOULDER, Landmark.RIGHT_SHOULDER, Landmark.LEFT_ELBOW, Landmark.RIGHT_ELBOW,
+            Landmark.LEFT_HIP, Landmark.RIGHT_HIP, Landmark.LEFT_KNEE, Landmark.RIGHT_KNEE,
+            Landmark.LEFT_ANKLE, Landmark.RIGHT_ANKLE,
+        ).filter { pose.visibility[it] >= 0.5f }.forEach { drawCircle(Signal.Good, 3.5.dp.toPx(), point(it)) }
+
+        // The landing pulse: a ring that grows and fades.
+        val p = pulse.value
+        val landed = strike
+        if (landed != null && p < 1f) {
+            val centre = at(landed.x, landed.y)
+            val radius = (10 + 34 * p).dp.toPx()
+            drawCircle(Signal.Good.copy(alpha = 0.25f * (1 - p)), radius, centre)
+            drawCircle(Signal.Good.copy(alpha = 0.95f * (1 - p)), radius, centre, style = Stroke(3.dp.toPx()))
         }
     }
 }
 
+/** Corner brackets framing where the whole runner should be, like a camera's viewfinder. */
 @Composable
-private fun RecordButton(phase: CapturePhase, enabled: Boolean, onClick: () -> Unit) {
+private fun ViewfinderMarks(modifier: Modifier) {
+    val colour = Signal.Good.copy(alpha = 0.7f)
+    Canvas(modifier) {
+        val arm = 22.dp.toPx()
+        val width = 2.dp.toPx()
+        fun corner(x: Float, y: Float, dx: Float, dy: Float) {
+            drawLine(colour, Offset(x, y), Offset(x + dx * arm, y), width, StrokeCap.Round)
+            drawLine(colour, Offset(x, y), Offset(x, y + dy * arm), width, StrokeCap.Round)
+        }
+        corner(0f, 0f, 1f, 1f)
+        corner(size.width, 0f, -1f, 1f)
+        corner(0f, size.height, 1f, -1f)
+        corner(size.width, size.height, -1f, -1f)
+    }
+}
+
+/** The pre-recording countdown: a big figure inside a ring that empties over each second. */
+@Composable
+private fun CountdownRing(secondsLeft: Int) {
+    val sweep = remember(secondsLeft) { Animatable(1f) }
+    LaunchedEffect(secondsLeft) { sweep.animateTo(0f, tween(1000, easing = LinearEasing)) }
+    Box(Modifier.size(180.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val stroke = 6.dp.toPx()
+            val inset = Offset(stroke / 2, stroke / 2)
+            val ringSize = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke)
+            drawArc(Color.White.copy(alpha = 0.15f), 0f, 360f, false, inset, ringSize, style = Stroke(stroke))
+            drawArc(Signal.Good, -90f, 360f * sweep.value, false, inset, ringSize, style = Stroke(stroke, cap = StrokeCap.Round))
+        }
+        Text("$secondsLeft", style = monoValue(88), color = Color.White)
+    }
+}
+
+@Composable
+private fun RecordButton(phase: CapturePhase, enabled: Boolean, progress: Float?, onClick: () -> Unit) {
     val recording = phase is CapturePhase.Recording
     val label = when (phase) {
         CapturePhase.Idle -> "Start recording"
@@ -516,45 +615,72 @@ private fun RecordButton(phase: CapturePhase, enabled: Boolean, onClick: () -> U
         is CapturePhase.Recording -> "Stop recording"
         CapturePhase.Saving -> "Saving"
     }
-    Box(
-        Modifier
-            .size(76.dp)
-            .border(4.dp, Color.White, CircleShape)
-            .padding(8.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        IconButton(
-            onClick = onClick,
-            enabled = enabled,
-            modifier = Modifier.fillMaxSize().semantics { contentDescription = label },
-            colors = IconButtonDefaults.iconButtonColors(
-                containerColor = Color(0xFFE53935),
-                disabledContainerColor = Color.Gray,
-            ),
+    // The ring fills as the clip records. Seconds arrive one at a time, so it glides between them.
+    val shown by animateFloatAsState(progress ?: 0f, tween(1000, easing = LinearEasing), label = "recordProgress")
+    Box(Modifier.size(88.dp), contentAlignment = Alignment.Center) {
+        if (progress != null) {
+            Canvas(Modifier.fillMaxSize()) {
+                val stroke = 4.dp.toPx()
+                val inset = Offset(stroke / 2, stroke / 2)
+                val ringSize = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke)
+                drawArc(Color.White.copy(alpha = 0.2f), 0f, 360f, false, inset, ringSize, style = Stroke(stroke))
+                drawArc(Color(0xFFFF5252), -90f, 360f * shown.coerceIn(0f, 1f), false, inset, ringSize, style = Stroke(stroke, cap = StrokeCap.Round))
+            }
+        }
+        Box(
+            Modifier
+                .size(76.dp)
+                .border(4.dp, if (progress != null) Color.White.copy(alpha = 0.35f) else Color.White, CircleShape)
+                .padding(8.dp),
+            contentAlignment = Alignment.Center,
         ) {
-            if (recording) {
-                Box(Modifier.size(24.dp).clip(RoundedCornerShape(4.dp)).background(Color.White))
+            IconButton(
+                onClick = onClick,
+                enabled = enabled,
+                modifier = Modifier.fillMaxSize().semantics { contentDescription = label },
+                colors = IconButtonDefaults.iconButtonColors(
+                    containerColor = Color(0xFFE53935),
+                    disabledContainerColor = Color.Gray,
+                ),
+            ) {
+                if (recording) {
+                    Box(Modifier.size(24.dp).clip(RoundedCornerShape(4.dp)).background(Color.White))
+                }
             }
         }
     }
 }
 
+/** A dark pill over the camera: a status dot (pulsing while recording) and a short monospace message. */
 @Composable
-private fun OverlayLabel(text: String, color: Color = Color.White) {
-    Text(
-        text,
-        color = color,
-        style = MaterialTheme.typography.labelLarge,
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(Color.Black.copy(alpha = 0.5f))
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+private fun OverlayLabel(text: String, dot: Color? = null, pulsing: Boolean = false) {
+    val pulse by rememberInfiniteTransition(label = "dot").animateFloat(
+        initialValue = 1f,
+        targetValue = if (pulsing) 0.25f else 1f,
+        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+        label = "dotAlpha",
     )
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(50))
+            .background(Color(0xFF0B1210).copy(alpha = 0.7f))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        dot?.let { Box(Modifier.size(8.dp).clip(CircleShape).background(it.copy(alpha = it.alpha * pulse))) }
+        Text(
+            text,
+            color = Color.White,
+            style = MaterialTheme.typography.labelMedium.copy(fontSize = 11.sp, letterSpacing = 0.3.sp),
+            maxLines = 2,
+        )
+    }
 }
 
 @Composable
 private fun overlayIconColors() = IconButtonDefaults.iconButtonColors(
-    containerColor = Color.Black.copy(alpha = 0.4f),
+    containerColor = Color(0xFF0B1210).copy(alpha = 0.6f),
     contentColor = Color.White,
 )
 

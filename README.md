@@ -52,6 +52,9 @@ Everything runs on the phone: there is no internet permission, no cloud service,
   clips still being analysed.
 - **Spoken cues:** optional, during a whole run, the phone's own offline voice says your focus cue after a minute
   and then every five minutes (`audio/SpokenCues.kt`). Nothing is sent online; with no offline voice it stays silent.
+- **Camera and run screens:** a viewfinder frame, a skeleton that glows and pulses at each foot landing
+  (`analysis/LiveStrikeDetector.kt`), a countdown ring and a ring that fills as the clip records. Figures count up on
+  the results.
 - **Appearance:** a dark "lab" look by default, with light and system options in Settings.
 - **Storage:** remove old videos but keep their results; a local crash log you can share yourself.
 - **Share results** from the results screen: a summary image of every measurement, optionally with an annotated

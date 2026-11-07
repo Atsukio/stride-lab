@@ -6,9 +6,12 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.compose.ui.graphics.Color
 import com.atsukio.runningcoach.ui.CoachTheme
+import com.atsukio.runningcoach.ui.CountUpText
 import com.atsukio.runningcoach.ui.HomeScreen
 import com.atsukio.runningcoach.ui.StorageScreen
+import com.atsukio.runningcoach.ui.monoValue
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -39,6 +42,23 @@ class ScreensTest {
         compose.onNodeWithText("Check your running form").assertIsDisplayed()
         compose.onNodeWithText("Record a clip").performClick()
         assertTrue(recorded)
+    }
+
+    @Test
+    fun countUpTextEndsOnItsFullText() {
+        compose.setContent {
+            CoachTheme {
+                CountUpText("27 cm ahead of hips", monoValue(18), Color.White, durationMs = 200)
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("27 cm ahead of hips").assertIsDisplayed()
+    }
+
+    @Test
+    fun countUpTextLeavesTextWithoutAFigureAlone() {
+        compose.setContent { CoachTheme { CountUpText("Good", monoValue(18), Color.White) } }
+        compose.onNodeWithText("Good").assertIsDisplayed()
     }
 
     @Test
