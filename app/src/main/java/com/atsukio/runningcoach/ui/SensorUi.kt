@@ -14,7 +14,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -168,7 +167,7 @@ fun SensorDialog(onDismiss: () -> Unit) {
                                 TextButton(onClick = hub::startScan) { Text("Search again") }
                             }
                             found.forEach { device ->
-                                Card(onClick = { hub.connect(device) }, modifier = Modifier.fillMaxWidth()) {
+                                LabCard(onClick = { hub.connect(device) }, modifier = Modifier.fillMaxWidth()) {
                                     Text(device.name, Modifier.padding(12.dp))
                                 }
                             }

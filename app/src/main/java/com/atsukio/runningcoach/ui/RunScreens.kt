@@ -21,7 +21,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -268,7 +267,7 @@ fun RunSummaryScreen(id: String, onBack: () -> Unit, onOpenSession: (String) -> 
         ) {
             item { RunOverview(loaded) }
             item {
-                Card(Modifier.fillMaxWidth()) {
+                LabCard(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("How your form changed", style = MaterialTheme.typography.titleMedium)
                         insights.forEach { Text("• $it") }
@@ -277,7 +276,7 @@ fun RunSummaryScreen(id: String, onBack: () -> Unit, onOpenSession: (String) -> 
             }
             if (analysed.size >= 2) {
                 item {
-                    Card(Modifier.fillMaxWidth()) {
+                    LabCard(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Row(
                                 Modifier.horizontalScroll(rememberScrollState()),
@@ -335,7 +334,7 @@ private fun RunOverview(data: RunData) {
     val samples = data.run.samples
     val heartRates = samples.mapNotNull { it.heartRate }
     val speeds = samples.mapNotNull { it.speedKmh }.filter { it > 1 }
-    Card(Modifier.fillMaxWidth()) {
+    LabCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(data.run.startedAt)),
@@ -412,7 +411,7 @@ private fun ClipRow(session: Session, onClick: () -> Unit) {
             Coach.mainFocus(Coach.review(metrics, session.speedKmh))?.let { "focus: ${it.topic.lowercase()}" },
         ).joinToString(" · ")
     }
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+    LabCard(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
             Text(
                 "At ${formatDuration(session.runOffsetSec ?: 0.0)}",

@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -136,7 +135,7 @@ fun LandingCard(
         image = withContext(Dispatchers.IO) { videoFrame(video, frame / playbackFps.toDouble(), aspectRatio) }
     }
 
-    ElevatedCard(Modifier.fillMaxWidth()) {
+    LabCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("At landing", style = MaterialTheme.typography.titleMedium)
             Box(

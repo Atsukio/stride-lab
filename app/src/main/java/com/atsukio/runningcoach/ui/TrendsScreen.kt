@@ -15,7 +15,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -125,7 +124,7 @@ private fun ProgressCard(metric: ProgressMetric, points: List<ProgressPoint>) {
     val lineColor = MaterialTheme.colorScheme.primary
     val goodColor = Color(0xFF4CAF50)
     val grid = MaterialTheme.colorScheme.outlineVariant
-    ElevatedCard(Modifier.fillMaxWidth()) {
+    LabCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(metric.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))

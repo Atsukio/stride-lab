@@ -39,6 +39,8 @@ Everything runs on the phone: there is no internet permission, no cloud service,
   (head or feet cut off, facing the camera, too small, off-centre, too dark).
 - **Metronome** at a chosen step rate, on the camera and run screens; the cadence card can set it to your target.
 - **Progress:** every measurement charted across your clips against its good range.
+- **Appearance:** a dark "lab" look by default, with light and system options in Settings.
+- **Storage:** remove old videos but keep their results; a local crash log you can share yourself.
 - **Share results** from the results screen: a summary image of every measurement, optionally with an annotated
   landing still and the clip, sent through Android's share sheet to the app you choose. The app itself never uploads.
 

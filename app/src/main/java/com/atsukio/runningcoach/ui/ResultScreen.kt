@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -37,10 +38,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
@@ -71,6 +69,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
@@ -98,8 +97,6 @@ import kotlin.math.roundToInt
 /** [pose] is cleaned for display and analysis; [rawPose] is exactly what the detector found. */
 private class ResultData(val session: Session, val pose: PoseTrack?, val rawPose: PoseTrack?, val previous: GaitMetrics?)
 
-private val GoodColor = Color(0xFF2E7D32)
-private val ImproveColor = Color(0xFFEF6C00)
 private val LeftColor = Color(0xFF4FC3F7)
 private val RightColor = Color(0xFFFFB74D)
 private val LandingColor = Color(0xFFFFEB3B)
@@ -330,7 +327,7 @@ private fun ResultContent(
             }
         } else {
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                LabCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
                     Text(
                         "The video was removed to save space. The results are kept.",
                         Modifier.padding(16.dp),
@@ -357,7 +354,7 @@ private fun ResultContent(
         items(feedback) { FeedbackCard(it) }
         if (session.warnings.isNotEmpty()) {
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                LabCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("About this recording", style = MaterialTheme.typography.titleSmall)
                         session.warnings.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
@@ -379,7 +376,7 @@ private fun ResultContent(
 @Composable
 private fun Summary(session: Session, feedback: List<Feedback>) {
     val failure = session.failure
-    Card(Modifier.fillMaxWidth()) {
+    LabCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (failure != null) {
                 Text("Couldn't analyse this clip", style = MaterialTheme.typography.titleMedium)
@@ -389,24 +386,30 @@ private fun Summary(session: Session, feedback: List<Feedback>) {
             }
             val focus = Coach.mainFocus(feedback)
             if (focus != null) {
-                Text("Main focus: ${focus.topic.lowercase()}", style = MaterialTheme.typography.titleMedium)
-                focus.cue?.let { Text("Think: \"$it\"") }
+                SectionLabel("Main focus", colour = signalColour(false))
+                Text(focus.topic, style = MaterialTheme.typography.headlineSmall)
+                focus.cue?.let {
+                    Text("Think: \"$it\"", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
+                }
             } else {
-                Text("Nice running: nothing major to fix", style = MaterialTheme.typography.titleMedium)
+                SectionLabel("All clear", colour = signalColour(true))
+                Text("Nice running: nothing major to fix", style = MaterialTheme.typography.headlineSmall)
             }
-            val details = listOfNotNull(
-                session.metrics?.let { "${it.stepCount} steps analysed" },
-                session.speedKmh?.let { "${formatSpeed(it)} km/h" + if (session.speedFromSensor) " (from watch)" else "" },
-                "${session.fps.roundToInt()} fps",
-                session.processingSec?.let {
-                    "analysed in %.1f s".format(it) + if (session.analysedLive) " (live)" else ""
-                },
-            )
-            Text(
-                details.joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(
+                Modifier.padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                session.metrics?.let { StatChip("${it.stepCount}", "steps") }
+                session.speedKmh?.let { StatChip(formatSpeed(it), if (session.speedFromSensor) "km/h watch" else "km/h") }
+                StatChip("${session.fps.roundToInt()}", "fps")
+            }
+            session.processingSec?.let {
+                Text(
+                    "Analysed in %.1f s".format(it) + if (session.analysedLive) " while recording" else "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             session.sensor?.let { sensor ->
                 val watch = listOfNotNull(
                     sensor.heartRate?.let { "♥ $it" },
@@ -431,7 +434,7 @@ private fun HeightCard(estimatedCm: Double, fromWatch: Boolean) {
     val settings = remember { CoachSettings(context) }
     var savedCm by remember { mutableStateOf(settings.runnerHeightCm) }
     val estimate = estimatedCm.roundToInt()
-    Card(Modifier.fillMaxWidth()) {
+    LabCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Estimated height: $estimate cm", style = MaterialTheme.typography.titleMedium)
             Text(
@@ -464,23 +467,32 @@ private fun HeightCard(estimatedCm: Double, fromWatch: Boolean) {
 
 @Composable
 private fun FeedbackCard(item: Feedback) {
-    val (icon, tint) = when (item.status) {
-        FeedbackStatus.GOOD -> Icons.Default.CheckCircle to GoodColor
-        FeedbackStatus.IMPROVE -> Icons.Default.Warning to ImproveColor
-        FeedbackStatus.INFO -> Icons.Default.Info to MaterialTheme.colorScheme.primary
+    val good = signalColour(true)
+    val (statusText, tint) = when (item.status) {
+        FeedbackStatus.GOOD -> "In range" to good
+        FeedbackStatus.IMPROVE -> "To work on" to signalColour(false)
+        FeedbackStatus.INFO -> "Note" to signalColour(null)
     }
-    ElevatedCard(Modifier.fillMaxWidth()) {
+    LabCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, contentDescription = item.status.name.lowercase(), tint = tint)
-                Spacer(Modifier.width(8.dp))
-                Text(item.topic, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                Text(item.value, style = MaterialTheme.typography.labelLarge)
+                Column(Modifier.weight(1f)) {
+                    Text(item.topic, style = MaterialTheme.typography.titleMedium)
+                    SectionLabel(statusText, colour = tint)
+                }
+                // Long values ("14° at landing, 38° max") are set smaller and wrap, so they don't squeeze the title.
+                Text(
+                    item.value,
+                    style = monoValue(if (item.value.length <= 8) 18 else 14),
+                    color = tint,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.widthIn(max = 190.dp),
+                )
             }
             Text(item.message, style = MaterialTheme.typography.bodyMedium)
             item.cue?.let { Text("Cue: \"$it\"", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold) }
             item.drill?.let { Text("Drill: $it", style = MaterialTheme.typography.bodyMedium) }
-            item.scale?.let { RangeBar(it, markerColor = tint, goodColor = GoodColor) }
+            item.scale?.let { RangeBar(it, markerColor = tint, goodColor = good) }
             item.metronomeSpm?.let { spm ->
                 val context = LocalContext.current
                 var set by remember { mutableStateOf(false) }

@@ -17,7 +17,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -44,6 +45,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.atsukio.runningcoach.R
 import com.atsukio.runningcoach.analysis.Coach
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -104,7 +106,14 @@ fun HomeScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.app_name)) },
+                title = {
+                    Text(
+                        stringResource(R.string.app_name).uppercase(),
+                        style = MaterialTheme.typography.labelLarge.copy(fontFamily = Mono, letterSpacing = 3.sp),
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
                 actions = {
                     IconButton(onClick = onOpenAbout) {
                         Icon(Icons.Default.Info, contentDescription = "About")
@@ -116,11 +125,14 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = onNewAnalysis,
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("New analysis") },
-            )
+            // The hero panel already has the record button; this one keeps it in reach once there's a history.
+            if (items?.isNotEmpty() == true) {
+                ExtendedFloatingActionButton(
+                    onClick = onNewAnalysis,
+                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    text = { Text("New analysis") },
+                )
+            }
         },
     ) { padding ->
         val list = items
@@ -139,10 +151,11 @@ fun HomeScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                item { RecordHero(onRecord = onNewAnalysis) }
                 item { WholeRunCard(inProgress = activeRun != null, onClick = onStartRun) }
                 val analysed = list.filterIsInstance<HomeItem.Clip>().map { it.session }.filter { it.metrics != null }
                 if (analysed.size >= 2) item { TrendsCard(analysed, onClick = onOpenTrends) }
-                if (list.isEmpty()) item { FilmingTips(onOpenGuide = onOpenGuide) }
+                if (list.isEmpty()) item { FilmingTips(onOpenGuide = onOpenGuide) } else item { SectionLabel("History", Modifier.padding(top = 8.dp)) }
                 items(list, key = { if (it is HomeItem.Run) "run-${it.run.id}" else (it as HomeItem.Clip).session.id }) { item ->
                     when (item) {
                         is HomeItem.Clip -> SessionCard(item.session, onClick = { onOpenSession(item.session.id) })
@@ -164,8 +177,9 @@ private fun TrendsCard(analysed: List<Session>, onClick: () -> Unit) {
     val byDate = analysed.sortedBy { it.createdAt }
     val first = byDate.first().metrics?.cadenceSpm
     val last = byDate.last().metrics?.cadenceSpm
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+    LabCard(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            SectionLabel("Progress")
             Text("Your progress", style = MaterialTheme.typography.titleMedium)
             Text(
                 if (first != null && last != null) {
@@ -182,7 +196,7 @@ private fun TrendsCard(analysed: List<Session>, onClick: () -> Unit) {
 
 @Composable
 fun FilmingTips(modifier: Modifier = Modifier, onOpenGuide: (() -> Unit)? = null) {
-    Card(modifier.fillMaxWidth()) {
+    LabCard(modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("How to film", style = MaterialTheme.typography.titleMedium)
             Text("1. Run on a treadmill so you stay in one spot.")
@@ -202,8 +216,9 @@ fun FilmingTips(modifier: Modifier = Modifier, onOpenGuide: (() -> Unit)? = null
 
 @Composable
 private fun WholeRunCard(inProgress: Boolean, onClick: () -> Unit) {
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+    LabCard(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            SectionLabel(if (inProgress) "In progress" else "Whole run", colour = if (inProgress) signalColour(true) else MaterialTheme.colorScheme.secondary)
             Text(
                 if (inProgress) "Run in progress: tap to return" else "Start a whole run",
                 style = MaterialTheme.typography.titleMedium,
@@ -220,20 +235,18 @@ private fun WholeRunCard(inProgress: Boolean, onClick: () -> Unit) {
 @Composable
 private fun RunCard(run: WholeRun, clipCount: Int, onClick: () -> Unit) {
     val heartRates = run.samples.mapNotNull { it.heartRate }
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp)) {
+    LabCard(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionLabel("Whole run", colour = MaterialTheme.colorScheme.secondary)
             Text(
-                "Whole run · " + DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(run.startedAt)),
+                DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(run.startedAt)),
                 style = MaterialTheme.typography.titleMedium,
             )
-            Text(
-                listOfNotNull(
-                    formatDuration(run.durationSec),
-                    "$clipCount ${if (clipCount == 1) "clip" else "clips"}",
-                    heartRates.takeIf { it.isNotEmpty() }?.let { "avg ♥ ${it.average().roundToInt()}" },
-                ).joinToString(" · "),
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatChip(formatDuration(run.durationSec), null)
+                StatChip("$clipCount", if (clipCount == 1) "clip" else "clips")
+                heartRates.takeIf { it.isNotEmpty() }?.let { StatChip("${it.average().roundToInt()}", "bpm avg") }
+            }
         }
     }
 }
@@ -241,30 +254,46 @@ private fun RunCard(run: WholeRun, clipCount: Int, onClick: () -> Unit) {
 @Composable
 private fun SessionCard(session: Session, onClick: () -> Unit) {
     val metrics = session.metrics
-    val summary = when {
-        metrics == null -> "Couldn't analyse this clip"
-        else -> {
-            val focus = Coach.mainFocus(Coach.review(metrics, session.speedKmh))
-            listOfNotNull(
-                metrics.cadenceSpm?.let { "${it.roundToInt()} steps/min" },
-                focus?.let { "Focus: ${it.topic.lowercase()}" } ?: "Looking good",
-            ).joinToString(" · ")
-        }
-    }
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp)) {
-            Text(
-                DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(session.createdAt)),
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(summary, style = MaterialTheme.typography.bodyMedium)
-            session.speedKmh?.let {
+    val focus = metrics?.let { Coach.mainFocus(Coach.review(it, session.speedKmh)) }
+    LabCard(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatusDot(if (metrics == null) false else focus == null)
                 Text(
-                    "${formatSpeed(it)} km/h",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(session.createdAt)),
+                    style = MaterialTheme.typography.titleMedium,
                 )
             }
+            if (metrics == null) {
+                Text("Couldn't analyse this clip", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Text(
+                    focus?.let { "Focus: ${it.topic.lowercase()}" } ?: "Looking good",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    metrics.cadenceSpm?.let { StatChip("${it.roundToInt()}", "spm") }
+                    session.speedKmh?.let { StatChip(formatSpeed(it), "km/h") }
+                    metrics.overstrideCm?.let { StatChip("${it.roundToInt()}", "cm overstride") }
+                }
+            }
+        }
+    }
+}
+
+/** The main call to action: record a clip. */
+@Composable
+private fun RecordHero(onRecord: () -> Unit) {
+    ViewfinderPanel {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SectionLabel("Ready")
+            Text("Check your running form", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                "Film a side-on clip from the treadmill. Everything is analysed on this phone.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Button(onClick = onRecord) { Text("Record a clip") }
         }
     }
 }
@@ -276,6 +305,7 @@ private fun SettingsDialog(settings: CoachSettings, onDismiss: () -> Unit) {
     var seconds by remember { mutableIntStateOf(settings.recordSeconds) }
     var live by remember { mutableStateOf(settings.liveAnalysis) }
     var gpu by remember { mutableStateOf(settings.useGpu) }
+    var appearance by remember { mutableStateOf(settings.appearance) }
     val value = text.toDoubleOrNull()
     val valid = value != null && value in 100.0..230.0
     AlertDialog(
@@ -300,6 +330,12 @@ private fun SettingsDialog(settings: CoachSettings, onDismiss: () -> Unit) {
                     isError = !valid,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 )
+                Text("Appearance", style = MaterialTheme.typography.titleSmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Appearance.entries.forEach { option ->
+                        FilterChip(selected = appearance == option, onClick = { appearance = option }, label = { Text(option.label) })
+                    }
+                }
                 Text("Clip length", style = MaterialTheme.typography.titleSmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     CoachSettings.RECORD_OPTIONS.forEach { option ->
@@ -335,6 +371,8 @@ private fun SettingsDialog(settings: CoachSettings, onDismiss: () -> Unit) {
                     settings.recordSeconds = seconds
                     settings.liveAnalysis = live
                     settings.useGpu = gpu
+                    settings.appearance = appearance
+                    AppearanceState.current = appearance
                     onDismiss()
                 },
                 enabled = valid,

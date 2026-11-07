@@ -1,17 +1,23 @@
 package com.atsukio.runningcoach
 
+import android.graphics.Color
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.DisposableEffect
 import com.atsukio.runningcoach.audio.Metronome
+import com.atsukio.runningcoach.data.CoachSettings
 import com.atsukio.runningcoach.data.CrashLog
 import com.atsukio.runningcoach.data.RunRecorder
 import com.atsukio.runningcoach.sensors.SensorHub
+import com.atsukio.runningcoach.ui.AppearanceState
 import com.atsukio.runningcoach.ui.CoachApp
 import com.atsukio.runningcoach.ui.CoachTheme
 import com.atsukio.runningcoach.ui.ShutterKeys
+import com.atsukio.runningcoach.ui.isDarkAppearance
 
 class MainActivity : ComponentActivity() {
     private val shutterKeys = ShutterKeys()
@@ -22,8 +28,16 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         CrashLog.install(this)
+        AppearanceState.current = CoachSettings(this).appearance
         enableEdgeToEdge()
         setContent {
+            // Light system-bar icons on the dark theme and the reverse, following the chosen appearance.
+            val dark = isDarkAppearance()
+            DisposableEffect(dark) {
+                val bars = if (dark) SystemBarStyle.dark(Color.TRANSPARENT) else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+                enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
+                onDispose {}
+            }
             CoachTheme {
                 CoachApp()
             }

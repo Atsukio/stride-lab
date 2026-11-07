@@ -81,6 +81,19 @@ app/src/main/java/com/atsukio/runningcoach/
 - The setup diagram must clearly show the camera **side-on** to the runner, never facing them.
 - `MediaMetadataRetriever` frame grabs are slow. Do them off the main thread (`Dispatchers.IO`).
 
+## Design system
+
+The look is a dark-first "lab" style: near-black green background, mint accent, flat outlined panels, monospace
+figures. It lives in `ui/Theme.kt` (colours, typography, shapes, `Appearance` setting) and `ui/LabComponents.kt`.
+
+- Use `LabCard`, never Material `Card`/`ElevatedCard`. Use `SectionLabel` for the small capitals tags,
+  `StatChip` for a figure with a unit, `StatusDot` and `signalColour(good)` for status (green in range, amber to
+  work on, blue for a note), and `monoValue(size)` for any measurement or timer. Pick colours from
+  `MaterialTheme.colorScheme`, not hex values, so the light theme keeps working.
+- No dynamic (wallpaper) colour: the brand palette is fixed. The share card draws its own always-dark palette in
+  `share/ShareCard.kt`; keep the two in step if the palette changes.
+- Check both themes on the emulator (Settings > Appearance) after UI changes. Screenshots: `adb exec-out screencap -p`.
+
 ## Style
 
 - Kotlin, Compose Material 3, no new architecture libraries (no DI framework, no Room) without asking.

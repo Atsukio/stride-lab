@@ -2,6 +2,7 @@ package com.atsukio.runningcoach.data
 
 import android.content.Context
 import androidx.core.content.edit
+import com.atsukio.runningcoach.ui.Appearance
 
 class CoachSettings(context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
@@ -31,6 +32,11 @@ class CoachSettings(context: Context) {
         get() = prefs.getBoolean(KEY_GUIDE_SEEN, false)
         set(value) = prefs.edit { putBoolean(KEY_GUIDE_SEEN, value) }
 
+    /** Dark, light or the phone's choice, stored by name. */
+    var appearance: Appearance
+        get() = runCatching { Appearance.valueOf(prefs.getString(KEY_APPEARANCE, null).orEmpty()) }.getOrDefault(Appearance.DARK)
+        set(value) = prefs.edit { putString(KEY_APPEARANCE, value.name) }
+
     /** The metronome's step rate. */
     var metronomeSpm: Int
         get() = prefs.getInt(KEY_METRONOME, DEFAULT_METRONOME_SPM).coerceIn(METRONOME_RANGE)
@@ -40,6 +46,7 @@ class CoachSettings(context: Context) {
         val RECORD_OPTIONS = listOf(10, 15, 20, 30)
         val METRONOME_RANGE = 140..210
         private const val DEFAULT_METRONOME_SPM = 170
+        private const val KEY_APPEARANCE = "appearance"
         private const val KEY_METRONOME = "metronome_spm"
         private const val KEY_GUIDE_SEEN = "guide_seen"
         private const val DEFAULT_RECORD_SECONDS = 15

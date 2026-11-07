@@ -201,10 +201,12 @@ fun AnalysisScreen(
         ) {
             when (val s = state) {
                 is AnalysisState.Running -> {
-                    ElapsedTime(viewModel.startedAtMs)
-                    Text("Finding the runner in each frame…", style = MaterialTheme.typography.titleMedium)
+                    SectionLabel("Analysing")
+                    ScanPanel()
+                    Text("${(s.progress * 100).roundToInt()}%", style = MaterialTheme.typography.displayMedium)
                     LinearProgressIndicator(progress = { s.progress }, modifier = Modifier.fillMaxWidth())
-                    Text("${(s.progress * 100).roundToInt()}%")
+                    Text("Finding the runner in each frame…", style = MaterialTheme.typography.titleMedium)
+                    ElapsedTime(viewModel.startedAtMs)
                     Text(
                         "This runs on your phone and can take a minute.",
                         style = MaterialTheme.typography.bodySmall,
@@ -213,9 +215,11 @@ fun AnalysisScreen(
                     OutlinedButton(onClick = cancel) { Text("Cancel") }
                 }
                 AnalysisState.Measuring, is AnalysisState.Done -> {
-                    ElapsedTime(viewModel.startedAtMs)
-                    Text("Measuring your form…", style = MaterialTheme.typography.titleMedium)
+                    SectionLabel("Measuring")
+                    ScanPanel()
                     LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Text("Measuring your form…", style = MaterialTheme.typography.titleMedium)
+                    ElapsedTime(viewModel.startedAtMs)
                 }
                 is AnalysisState.Error -> {
                     Text("Couldn't analyse this video", style = MaterialTheme.typography.titleMedium)
@@ -239,6 +243,7 @@ private fun ElapsedTime(startedAtMs: Long) {
     }
     Text(
         "%.1f s".format((now - startedAtMs) / 1000.0),
-        style = MaterialTheme.typography.headlineSmall,
+        style = monoValue(18),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
