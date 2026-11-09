@@ -20,6 +20,9 @@ This file covers how to work on it.
 4. **No secrets or client data.** This repo has neither. Never read, print or commit `.env` files or
    credentials, or `local.properties` beyond `sdk.dir`.
 5. **Coaching is not medical advice.** Any user-facing text that judges form must keep that framing.
+6. **Always follow Conventional Commits.** Every commit message must strictly follow Conventional Commits
+   (e.g. `feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`) in lowercase imperative format
+   (e.g. `feat: add ...`, `fix: resolve ...`). Commit and push only when instructed by the user and once verification passes.
 
 ## Build, test and verify
 
@@ -152,7 +155,7 @@ figures. It lives in `ui/Theme.kt` (colours, typography, shapes, `Appearance` se
 ### Idea backlog (not started)
 
 Done so far: share image, storage controls, crash log, dark lab redesign, steady-part trimming, milestones, last-time
-ghost, focus plan, spoken cues, background analysis, instrumented tests, video overlay MP4 export, PDF report, side-by-side clip comparison, foot strike ratio tracking and trends, audio cue controls.
+ghost, focus plan, spoken cues, background analysis, instrumented tests, video overlay MP4 export, PDF report, side-by-side clip comparison, foot strike ratio tracking and trends, audio cue controls, synchronized strike scrubbing, interactive foot strike target overlay, intuitive lab icons.
 
 - Front and rear view analysis (knee collapse, hip drop, crossover). `GaitAnalyzer` rejects those views today; this
   needs different landmarks and metrics, a camera-placement guide, and real footage to check against before it can be trusted.
