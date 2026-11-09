@@ -138,8 +138,8 @@ figures. It lives in `ui/Theme.kt` (colours, typography, shapes, `Appearance` se
 - User-facing text and docs use plain British/Australian spelling: licence, analyse, colour, centimetres.
   Keep sentences short and concrete, and avoid jargon in the UI.
 - Comments explain why, not what. Keep KDoc on public and internal functions short.
-- Commit messages are a single imperative sentence describing the user-visible change, with no prefix, e.g.
-  "Share results as an image through the share sheet". Commit and push to `main` only once verification passes.
+- Commit messages must follow **Conventional Commits** (e.g. `feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`)
+  describing the change in an imperative sentence. Commit and push only when instructed by the user and once verification passes.
 
 ## How to work with this user
 
@@ -152,7 +152,7 @@ figures. It lives in `ui/Theme.kt` (colours, typography, shapes, `Appearance` se
 ### Idea backlog (not started)
 
 Done so far: share image, storage controls, crash log, dark lab redesign, steady-part trimming, milestones, last-time
-ghost, focus plan, spoken cues, background analysis, instrumented tests.
+ghost, focus plan, spoken cues, background analysis, instrumented tests, video overlay MP4 export, PDF report, side-by-side clip comparison, foot strike ratio tracking and trends, audio cue controls.
 
 - Front and rear view analysis (knee collapse, hip drop, crossover). `GaitAnalyzer` rejects those views today; this
   needs different landmarks and metrics, a camera-placement guide, and real footage to check against before it can be trusted.
