@@ -58,7 +58,10 @@ Everything runs on the phone: there is no internet permission, no cloud service,
 - **Appearance:** a dark "lab" look by default, with light and system options in Settings.
 - **Storage:** remove old videos but keep their results; a local crash log you can share yourself.
 - **Share results** from the results screen: a summary image of every measurement, optionally with an annotated
-  landing still and the clip, sent through Android's share sheet to the app you choose. The app itself never uploads.
+  landing still, a written PDF report, the clip, or the clip re-encoded with your skeleton and landing measurements
+  drawn on, sent through Android's share sheet to the app you choose. The app itself never uploads.
+- **Compare two clips** from the results screen: both videos side by side, looped over the same landings and
+  played at matching speeds so the strides line up, with a table of how each measurement changed.
 
 ## Watch and sensors
 
@@ -115,7 +118,7 @@ app/src/main/java/com/atsukio/runningcoach/
   analysis/   Pure Kotlin: pose track, gait metrics, coaching rules (unit-tested)
   pose/       MediaPipe frame-by-frame pose extraction
   data/       Session storage in app-private files, settings
-  share/      Summary image and text for sharing a result
+  share/      Summary image, PDF report, skeleton-overlay video and text for sharing a result
   ui/         Compose screens: home, capture, analysis progress, results
 ```
 

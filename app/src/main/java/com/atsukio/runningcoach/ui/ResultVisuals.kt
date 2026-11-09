@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -29,6 +30,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,6 +55,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.scale
+import com.atsukio.runningcoach.analysis.FootStrikeType
 import com.atsukio.runningcoach.analysis.GaitMetrics
 import com.atsukio.runningcoach.analysis.LandingAnnotation
 import com.atsukio.runningcoach.analysis.PoseTrack
@@ -66,6 +69,14 @@ import kotlin.math.roundToInt
 private val OverstrideColor = Color(0xFFFFEB3B)
 private val ShinColor = Color(0xFFFFB74D)
 private val KneeColor = Color(0xFF4FC3F7)
+private val TargetMintColor = Color(0xFF8BE9C1)
+
+/** Visual mode for landing inspection: actual tracked form, ideal target form, or both overlaid. */
+enum class LandingVisualMode(val label: String) {
+    TRACKED("Tracked"),
+    TARGET("Target"),
+    OVERLAY("Overlay"),
+}
 
 /** A bar showing where a measurement sits against its good range. */
 @Composable
@@ -129,6 +140,11 @@ fun LandingCard(
     if (contacts.isEmpty()) return
     val frame = contacts[index.coerceIn(contacts.indices)]
     val annotation = remember(frame) { landingAnnotation(track, metrics, frame) }
+    val legCm = remember(metrics) {
+        metrics.overstrideCm?.let { cm -> metrics.overstrideLegRatio?.takeIf { abs(it) > 1e-6 }?.let { cm / it } }
+    }
+    val idealAnnotation = remember(annotation, legCm) { annotation?.ideal(legCm = legCm) }
+    var mode by rememberSaveable { mutableStateOf(LandingVisualMode.TRACKED) }
     var image by remember { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(frame) {
         image = null
@@ -137,7 +153,19 @@ fun LandingCard(
 
     LabCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("At landing", style = MaterialTheme.typography.titleMedium)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("At landing", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.weight(1f))
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    LandingVisualMode.entries.forEach { m ->
+                        FilterChip(
+                            selected = mode == m,
+                            onClick = { mode = m },
+                            label = { Text(m.label, style = MaterialTheme.typography.labelSmall) },
+                        )
+                    }
+                }
+            }
             Box(
                 Modifier.fillMaxWidth().clip(MaterialTheme.shapes.medium).background(Color.Black),
                 contentAlignment = Alignment.Center,
@@ -154,7 +182,9 @@ fun LandingCard(
                     } else {
                         CircularProgressIndicator(Modifier.align(Alignment.Center))
                     }
-                    annotation?.let { LandingOverlay(it, Modifier.fillMaxSize()) }
+                    if (annotation != null && idealAnnotation != null) {
+                        LandingOverlay(annotation, idealAnnotation, mode, Modifier.fillMaxSize())
+                    }
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -164,10 +194,16 @@ fun LandingCard(
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = { onIndex(index + 1) }, enabled = index < contacts.lastIndex) { Text("Next ›") }
             }
-            annotation?.let { a ->
+            val showing = if (mode == LandingVisualMode.TARGET) idealAnnotation else annotation
+            showing?.let { a ->
+                if (mode == LandingVisualMode.TARGET) {
+                    Legend(TargetMintColor, "Target landing: foot landing close under hips")
+                } else if (mode == LandingVisualMode.OVERLAY) {
+                    Legend(TargetMintColor, "Dashed mint: target landing under body")
+                }
                 a.overstrideCm?.let {
                     Legend(
-                        OverstrideColor,
+                        if (mode == LandingVisualMode.TARGET) TargetMintColor else OverstrideColor,
                         if (it > 0) "Foot lands ${it.roundToInt()} cm ahead of your hips" else "Foot lands under your hips",
                     )
                 }
@@ -177,6 +213,14 @@ fun LandingCard(
                     MaterialTheme.colorScheme.onSurface,
                     "Leaning ${abs(a.leanDeg).roundToInt()}° " + if (a.leanDeg >= 0) "forward" else "back",
                 )
+                a.strike?.let { strike ->
+                    val (label, col) = when (strike) {
+                        FootStrikeType.HEEL -> "Heel strike" to Signal.Info
+                        FootStrikeType.MIDFOOT -> "Midfoot strike" to Signal.Good
+                        FootStrikeType.FOREFOOT -> "Forefoot strike" to Signal.Improve
+                    }
+                    Legend(col, "Landing strike: $label")
+                }
             } ?: Text(
                 "The runner's leg couldn't be made out on this landing.",
                 style = MaterialTheme.typography.bodySmall,
@@ -209,9 +253,38 @@ private fun Legend(color: Color, text: String) {
 }
 
 @Composable
-private fun LandingOverlay(a: LandingAnnotation, modifier: Modifier) {
+private fun LandingOverlay(
+    actual: LandingAnnotation,
+    ideal: LandingAnnotation,
+    mode: LandingVisualMode,
+    modifier: Modifier,
+) {
     val measurer = rememberTextMeasurer()
-    Canvas(modifier) { drawLanding(a, measurer, Offset.Zero, size) }
+    Canvas(modifier) {
+        when (mode) {
+            LandingVisualMode.TRACKED -> drawLanding(actual, measurer, Offset.Zero, size)
+            LandingVisualMode.TARGET -> drawLanding(ideal, measurer, Offset.Zero, size, isIdeal = true)
+            LandingVisualMode.OVERLAY -> {
+                drawLanding(actual, measurer, Offset.Zero, size)
+                drawLandingGhost(ideal, Offset.Zero, size)
+            }
+        }
+    }
+}
+
+/** Draws the target proper form leg as a dashed mint ghost. */
+internal fun DrawScope.drawLandingGhost(ideal: LandingAnnotation, origin: Offset, frameSize: Size) {
+    fun p(point: com.atsukio.runningcoach.analysis.Point) =
+        Offset(origin.x + point.x * frameSize.width, origin.y + point.y * frameSize.height)
+    val hip = p(ideal.hip)
+    val knee = p(ideal.knee)
+    val ankle = p(ideal.ankle)
+    val thick = 4.dp.toPx()
+    val dashes = PathEffect.dashPathEffect(floatArrayOf(10.dp.toPx(), 7.dp.toPx()))
+
+    drawLine(TargetMintColor, hip, knee, thick, StrokeCap.Round, pathEffect = dashes)
+    drawLine(TargetMintColor, knee, ankle, thick, StrokeCap.Round, pathEffect = dashes)
+    drawCircle(TargetMintColor, radius = 6.dp.toPx(), center = ankle)
 }
 
 /**
@@ -223,7 +296,13 @@ internal fun DrawScope.drawLabel(measurer: TextMeasurer, text: String, topLeft: 
     drawText(measurer.measure(text, style), topLeft = topLeft)
 
 /** The landing measurements drawn over a video frame that fills [frameSize] at [origin]. */
-internal fun DrawScope.drawLanding(a: LandingAnnotation, measurer: TextMeasurer, origin: Offset, frameSize: Size) {
+internal fun DrawScope.drawLanding(
+    a: LandingAnnotation,
+    measurer: TextMeasurer,
+    origin: Offset,
+    frameSize: Size,
+    isIdeal: Boolean = false,
+) {
     run {
         fun p(point: com.atsukio.runningcoach.analysis.Point) =
             Offset(origin.x + point.x * frameSize.width, origin.y + point.y * frameSize.height)
@@ -235,11 +314,13 @@ internal fun DrawScope.drawLanding(a: LandingAnnotation, measurer: TextMeasurer,
         val thick = 4.dp.toPx()
         val dashes = PathEffect.dashPathEffect(floatArrayOf(10f, 8f))
         val label = TextStyle(color = Color.White, fontSize = 13.sp, background = Color.Black.copy(alpha = 0.65f))
+        val shinCol = if (isIdeal) TargetMintColor else ShinColor
+        val overstrideCol = if (isIdeal) TargetMintColor else OverstrideColor
 
         // Body: trunk and thigh in white, the shin highlighted.
         drawLine(Color.White, shoulder, hip, thin, StrokeCap.Round)
         drawLine(Color.White, hip, knee, thin, StrokeCap.Round)
-        drawLine(ShinColor, knee, ankle, thick, StrokeCap.Round)
+        drawLine(shinCol, knee, ankle, thick, StrokeCap.Round)
 
         // Lean: the trunk against a vertical line through the hips.
         drawLine(Color.White.copy(alpha = 0.6f), hip, Offset(hip.x, shoulder.y), thin, pathEffect = dashes)
@@ -247,19 +328,45 @@ internal fun DrawScope.drawLanding(a: LandingAnnotation, measurer: TextMeasurer,
         // Overstride: straight down from the hips, then across to where the foot lands.
         a.overstrideCm?.let { cm ->
             val ground = Offset(hip.x, ankle.y)
-            drawLine(OverstrideColor, hip, ground, thin, pathEffect = dashes)
-            drawLine(OverstrideColor, ground, ankle, thick, StrokeCap.Round)
+            drawLine(overstrideCol, hip, ground, thin, pathEffect = dashes)
+            drawLine(overstrideCol, ground, ankle, thick, StrokeCap.Round)
             val text = if (cm > 0) "${cm.roundToInt()} cm" else "under hips"
             drawLabel(measurer, text, Offset((ground.x + ankle.x) / 2 - 20.dp.toPx(), ankle.y + 8.dp.toPx()), label)
         }
 
         // Shin: against a vertical line through the ankle.
-        drawLine(ShinColor.copy(alpha = 0.7f), ankle, Offset(ankle.x, knee.y), thin, pathEffect = dashes)
+        drawLine(shinCol.copy(alpha = 0.7f), ankle, Offset(ankle.x, knee.y), thin, pathEffect = dashes)
         drawLabel(measurer, "${abs(a.shinDeg).roundToInt()}°", Offset(knee.x + 10.dp.toPx(), (knee.y + ankle.y) / 2), label)
 
         // Knee bend.
         drawCircle(KneeColor, radius = 7.dp.toPx(), center = knee, style = Stroke(thin))
         drawLabel(measurer, "${a.kneeFlexionDeg.roundToInt()}°", Offset(knee.x + 12.dp.toPx(), knee.y - 22.dp.toPx()), label.copy(color = KneeColor))
+
+        // Foot strike zone: draw heel-to-toe foot segment and strike point circle
+        if (a.heel != null && a.toe != null) {
+            val h = p(a.heel)
+            val t = p(a.toe)
+            drawLine(Color.White.copy(alpha = 0.8f), ankle, h, thin, StrokeCap.Round)
+            drawLine(Color.White.copy(alpha = 0.8f), h, t, thick, StrokeCap.Round)
+            val strikeSpot = when (a.strike) {
+                FootStrikeType.HEEL -> h
+                FootStrikeType.FOREFOOT -> t
+                FootStrikeType.MIDFOOT -> Offset((h.x + t.x) / 2f, (h.y + t.y) / 2f)
+                null -> when {
+                    a.heel.y - a.toe.y > 0.015f -> h
+                    a.toe.y - a.heel.y > 0.015f -> t
+                    else -> Offset((h.x + t.x) / 2f, (h.y + t.y) / 2f)
+                }
+            }
+            val spotCol = when (a.strike) {
+                FootStrikeType.HEEL -> Signal.Info
+                FootStrikeType.MIDFOOT -> Signal.Good
+                FootStrikeType.FOREFOOT -> Signal.Improve
+                null -> shinCol
+            }
+            drawCircle(spotCol, radius = 5.dp.toPx(), center = strikeSpot)
+            drawCircle(Color.White, radius = 2.dp.toPx(), center = strikeSpot)
+        }
     }
 }
 

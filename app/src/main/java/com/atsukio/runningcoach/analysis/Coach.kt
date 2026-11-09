@@ -68,6 +68,7 @@ object Coach {
             },
             metrics.elbowAngleDeg?.let { arms(it).copy(scale = Scale(it, 40.0, 160.0, 60.0, 110.0, "°")) },
             metrics.overstrideAsymmetryCm?.let { legBalance(it).copy(scale = Scale(it, 0.0, 20.0, 0.0, 8.0, "cm")) },
+            metrics.footStrikeSummary?.let { footStrike(metrics, it) },
         ).sortedBy { it.status.ordinal }
 
     /** The first thing to work on, or null if nothing needs changing. */
@@ -110,6 +111,9 @@ object Coach {
         val good = overstrideLimit(speedKmh)
         val value = if (cm <= 0) "Under hips" else "${cm.roundToInt()} cm ahead of hips"
         val history = since(previous, "cm")
+        val heavyHeel = (m.heelStrikeRatio ?: 0.0) > 0.70
+        val cue = if (heavyHeel) "Land softly under your hips." else "Land under your hips."
+        val drill = "High-knee marching, 2 × 20 m, then 3 × 15 seconds of quick, small steps."
         return when {
             ratio <= good -> Feedback(
                 "Foot landing", value, FeedbackStatus.GOOD,
@@ -118,15 +122,16 @@ object Coach {
             ratio <= good + 0.10 -> Feedback(
                 "Overstriding", value, FeedbackStatus.IMPROVE,
                 "Your foot lands a little far in front of your hips. Aim to land closer to underneath you.$history",
-                cue = "Land under your hips.",
-                drill = "High-knee marching, 2 × 20 m, then 3 × 15 seconds of quick, small steps.",
+                cue = cue,
+                drill = drill,
             )
             else -> Feedback(
                 "Overstriding", value, FeedbackStatus.IMPROVE,
-                "Your foot lands well in front of your hips, which acts like a brake on every step. " +
-                    "Landing closer to underneath you is the biggest improvement available.$history",
-                cue = "Land under your hips.",
-                drill = "High-knee marching, 2 × 20 m, then 3 × 15 seconds of quick, small steps.",
+                "Your foot lands well in front of your hips, which acts like a brake on every step" +
+                    (if (heavyHeel) " when landing on the heel" else "") +
+                    ". Landing closer to underneath you is the biggest improvement available.$history",
+                cue = cue,
+                drill = drill,
             )
         }
     }
@@ -260,6 +265,43 @@ object Coach {
                     "if it shows up every session or one side hurts, consider seeing a physiotherapist.",
             )
         }
+    }
+
+    private fun footStrike(metrics: GaitMetrics, summary: String): Feedback {
+        val primary = metrics.primaryStrikeType ?: FootStrikeType.MIDFOOT
+        val heelRatio = metrics.heelStrikeRatio ?: 0.0
+        val overstrideCm = metrics.overstrideCm
+        val overstrideHigh = overstrideCm != null && overstrideCm > 15.0
+
+        val (status, message, cue) = when {
+            heelRatio > 0.70 && overstrideHigh -> Triple(
+                FeedbackStatus.INFO,
+                "You land primarily on your heel ($summary). Because your foot is also landing ahead of your hips, bringing your landing closer under your body will help soften impact.",
+                "Land softly under your hips",
+            )
+            primary == FootStrikeType.HEEL -> Triple(
+                FeedbackStatus.GOOD,
+                "You land primarily on your heel ($summary). Heel striking is common and works well when your foot lands close under your body.",
+                null,
+            )
+            primary == FootStrikeType.MIDFOOT -> Triple(
+                FeedbackStatus.GOOD,
+                "You land with a midfoot strike ($summary). Landing flat under your centre of mass distributes impact evenly.",
+                null,
+            )
+            else -> Triple(
+                FeedbackStatus.GOOD,
+                "You land on your forefoot ($summary). Make sure your heel kisses the ground lightly to let your Achilles tendon and calves absorb shock naturally.",
+                "Let the heel kiss the ground",
+            )
+        }
+        return Feedback(
+            topic = "Foot strike",
+            value = summary,
+            status = status,
+            message = message,
+            cue = cue,
+        )
     }
 
     private fun since(previous: Double?, unit: String): String =

@@ -20,6 +20,7 @@ internal class SyntheticRunner(
     val facingRight: Boolean = true,
     val shoulderSpreadPx: Double = 4.0,
     val fps: Float = 60f,
+    val heelStrikeOffsetPx: Double = 0.0,
 ) {
     private val width = 1920
     private val height = 1080
@@ -84,8 +85,8 @@ internal class SyntheticRunner(
             }
             set(ids[0], knee(hip, ankle))
             set(ids[1], ankle)
-            set(ids[2], ankle + Vec2(-dir * 12, 10.0))
-            set(ids[3], ankle + Vec2(dir * 45, 14.0))
+            set(ids[2], ankle + Vec2(-dir * 12, 10.0 + heelStrikeOffsetPx))
+            set(ids[3], ankle + Vec2(dir * 45, 14.0 - heelStrikeOffsetPx))
         }
 
         return FramePose(
@@ -267,6 +268,30 @@ class GaitAnalyzerTest {
     fun rejectsClipWithoutRunner() {
         val empty = PoseTrack(60f, 1920, 1080, List(600) { null })
         assertTrue(GaitAnalyzer.analyze(empty, heightCm) is GaitResult.Failure)
+    }
+
+    @Test
+    fun identifiesFootStrikeTypesAndRatios() {
+        val midfoot = metricsOf(analyze(SyntheticRunner(heelStrikeOffsetPx = 0.0)))
+        assertEquals(1.0, midfoot.midfootStrikeRatio!!, 0.05)
+        assertEquals(0.0, midfoot.heelStrikeRatio!!, 0.05)
+        assertEquals(0.0, midfoot.forefootStrikeRatio!!, 0.05)
+        assertEquals(FootStrikeType.MIDFOOT, midfoot.primaryStrikeType)
+        assertTrue(midfoot.footStrikeSummary!!.contains("Midfoot"))
+
+        val heel = metricsOf(analyze(SyntheticRunner(heelStrikeOffsetPx = 15.0)))
+        assertEquals(1.0, heel.heelStrikeRatio!!, 0.05)
+        assertEquals(0.0, heel.midfootStrikeRatio!!, 0.05)
+        assertEquals(0.0, heel.forefootStrikeRatio!!, 0.05)
+        assertEquals(FootStrikeType.HEEL, heel.primaryStrikeType)
+        assertTrue(heel.footStrikeSummary!!.contains("Heel"))
+
+        val forefoot = metricsOf(analyze(SyntheticRunner(heelStrikeOffsetPx = -15.0)))
+        assertEquals(1.0, forefoot.forefootStrikeRatio!!, 0.05)
+        assertEquals(0.0, forefoot.midfootStrikeRatio!!, 0.05)
+        assertEquals(0.0, forefoot.heelStrikeRatio!!, 0.05)
+        assertEquals(FootStrikeType.FOREFOOT, forefoot.primaryStrikeType)
+        assertTrue(forefoot.footStrikeSummary!!.contains("Forefoot"))
     }
 }
 

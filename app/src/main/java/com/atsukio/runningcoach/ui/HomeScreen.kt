@@ -416,6 +416,7 @@ private fun SettingsDialog(settings: CoachSettings, onDismiss: () -> Unit) {
     var seconds by remember { mutableIntStateOf(settings.recordSeconds) }
     var live by remember { mutableStateOf(settings.liveAnalysis) }
     var gpu by remember { mutableStateOf(settings.useGpu) }
+    var spoken by remember { mutableStateOf(settings.spokenCues) }
     var appearance by remember { mutableStateOf(settings.appearance) }
     val value = text.toDoubleOrNull()
     val valid = value != null && value in 100.0..230.0
@@ -473,6 +474,12 @@ private fun SettingsDialog(settings: CoachSettings, onDismiss: () -> Unit) {
                     checked = gpu,
                     onChange = { gpu = it },
                 )
+                SettingSwitch(
+                    title = "Spoken coaching cues",
+                    detail = "Speaks short coaching reminders periodically during runs using the phone's offline voice. Turn off to keep all cues silent.",
+                    checked = spoken,
+                    onChange = { spoken = it },
+                )
             }
         },
         confirmButton = {
@@ -482,6 +489,7 @@ private fun SettingsDialog(settings: CoachSettings, onDismiss: () -> Unit) {
                     settings.recordSeconds = seconds
                     settings.liveAnalysis = live
                     settings.useGpu = gpu
+                    settings.spokenCues = spoken
                     settings.appearance = appearance
                     AppearanceState.current = appearance
                     onDismiss()

@@ -23,17 +23,29 @@ import java.util.Locale
  */
 object ResultSharer {
 
-    /** What to send besides the summary image: the landing at [landingIndex], and the clip itself. */
-    class Options(val landingIndex: Int?, val includeVideo: Boolean)
+    /**
+     * What to send besides the summary image: the landing at [landingIndex], the clip itself, the clip with the
+     * skeleton drawn on ([overlayVideo]) and a written PDF [report].
+     */
+    class Options(
+        val landingIndex: Int?,
+        val includeVideo: Boolean,
+        val overlayVideo: Boolean = false,
+        val report: Boolean = false,
+    )
 
-    /** Renders the image, copies the files to share and returns the share-sheet intent. Slow: call off the main thread. */
-    fun prepare(
+    /**
+     * Renders the image, copies the files to share and returns the share-sheet intent. Slow (the overlay video
+     * takes about as long as the clip): call off the main thread. [onProgress] reports 0..1 for the video.
+     */
+    suspend fun prepare(
         context: Context,
         session: Session,
         feedback: List<Feedback>,
         pose: PoseTrack?,
         video: File,
         options: Options,
+        onProgress: (Float) -> Unit = {},
     ): Intent {
         val date = DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(session.createdAt))
         val metrics = session.metrics
@@ -56,6 +68,16 @@ object ResultSharer {
         png.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         val files = mutableListOf(png)
         if (options.includeVideo && video.exists()) files += video.copyTo(File(dir, "$name.mp4"))
+        if (options.report) {
+            val pdf = File(dir, "$name-report.pdf")
+            ReportPdf.write(pdf, session, feedback, date, reportStills(session, pose, video))
+            files += pdf
+        }
+        if (options.overlayVideo && video.exists() && pose != null && metrics != null) {
+            val overlay = File(dir, "$name-skeleton.mp4")
+            OverlayVideoExporter.export(video, pose, metrics, session.playbackFps, overlay, onProgress)
+            files += overlay
+        }
 
         val authority = "${context.packageName}.share"
         val uris = files.map { FileProvider.getUriForFile(context, authority, it) }
@@ -75,6 +97,21 @@ object ResultSharer {
         send.clipData = ClipData.newRawUri(null, uris.first()).apply { uris.drop(1).forEach { addItem(ClipData.Item(it)) } }
         send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         return Intent.createChooser(send, "Share your results")
+    }
+
+    /** Up to three landings spread across the clip, for the report. Empty when the video is gone. */
+    private fun reportStills(session: Session, pose: PoseTrack?, video: File): List<LandingStill> {
+        val metrics = session.metrics ?: return emptyList()
+        val frames = metrics.contactFrames
+        if (!video.exists() || frames.isEmpty()) return emptyList()
+        val aspect = session.videoWidth.toFloat() / session.videoHeight.coerceAtLeast(1)
+        val picks = if (frames.size <= 3) frames.indices.toList() else listOf(frames.size / 4, frames.size / 2, frames.size * 3 / 4)
+        return picks.distinct().mapNotNull { index ->
+            val frame = frames[index]
+            videoFrameBitmap(video, frame / session.playbackFps.toDouble(), aspect, maxSide = 720)?.let {
+                LandingStill(it, pose?.let { track -> landingAnnotation(track, metrics, frame) }, index + 1, frames.size)
+            }
+        }
     }
 
     private const val SHARE_DIR = "shared"

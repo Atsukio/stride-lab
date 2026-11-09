@@ -29,4 +29,39 @@ class LandingAnnotationTest {
 
     @Test
     fun measuresTheLandingFacingLeft() = check(facingRight = false)
+
+    @Test
+    fun idealLandingPullsOverstrideUnderBodyWithGentleKneeFlexion() {
+        val runner = SyntheticRunner(landingAheadPx = 80.0, leanDeg = 6.0, facingRight = true)
+        val raw = runner.track(12.0)
+        val metrics = (GaitAnalyzer.analyze(raw, 175.0) as GaitResult.Success).metrics
+        val track = PoseCleaner.clean(raw)
+        val legCm = metrics.overstrideCm!! / metrics.overstrideLegRatio!!
+        val landing = metrics.contactFrames.first()
+        val actual = LandingAnnotation.at(track, landing, legCm)!!
+        val ideal = actual.ideal(targetOverstrideCm = 3.0, legCm = legCm)
+
+        assertEquals("target overstride", 3.0, ideal.overstrideCm!!, 1.0)
+        // Shin angle at ideal landing with soft knee flexion
+        org.junit.Assert.assertTrue("shin angle near vertical", kotlin.math.abs(ideal.shinDeg) < 20.0)
+        // Knee should be flexed, not straight
+        org.junit.Assert.assertTrue("knee flexed: ${ideal.kneeFlexionDeg}", ideal.kneeFlexionDeg in 15.0..45.0)
+        // Ground plane (ankle y) and hip position are unchanged
+        assertEquals(actual.ankle.y, ideal.ankle.y, 1e-4f)
+        assertEquals(actual.hip.x, ideal.hip.x, 1e-4f)
+        assertEquals(actual.hip.y, ideal.hip.y, 1e-4f)
+    }
+
+    @Test
+    fun classifiesStrikeOnLandingAnnotation() {
+        val runner = SyntheticRunner(heelStrikeOffsetPx = 15.0)
+        val raw = runner.track(12.0)
+        val metrics = (GaitAnalyzer.analyze(raw, 175.0) as GaitResult.Success).metrics
+        val track = PoseCleaner.clean(raw)
+        val legCm = metrics.overstrideCm!! / metrics.overstrideLegRatio!!
+        val landing = metrics.contactFrames.first()
+        val a = LandingAnnotation.at(track, landing, legCm, metrics.contactTimes.first())!!
+        assertEquals(FootStrikeType.HEEL, a.strike)
+        assertEquals(FootStrikeType.MIDFOOT, a.ideal(legCm = legCm).strike)
+    }
 }

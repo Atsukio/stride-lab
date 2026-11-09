@@ -14,6 +14,10 @@ import com.atsukio.runningcoach.share.ResultSharer
 import kotlinx.coroutines.launch
 import androidx.annotation.OptIn
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Size
+import com.atsukio.runningcoach.analysis.FootStrikeType
 import com.atsukio.runningcoach.analysis.measurementKey
 import com.atsukio.runningcoach.analysis.FocusPlan
 import com.atsukio.runningcoach.analysis.FramePose
@@ -34,6 +38,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -54,6 +59,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -129,7 +135,7 @@ private val GhostColor = Color(0xFF8BE9C1)
 
 @kotlin.OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ResultScreen(id: String, onBack: () -> Unit, onReanalyse: () -> Unit) {
+fun ResultScreen(id: String, onBack: () -> Unit, onReanalyse: () -> Unit, onCompare: () -> Unit = {}) {
     val context = LocalContext.current
     val repo = remember { SessionRepository(context) }
     var data by remember { mutableStateOf<ResultData?>(null) }
@@ -137,6 +143,8 @@ fun ResultScreen(id: String, onBack: () -> Unit, onReanalyse: () -> Unit) {
     var confirmDelete by remember { mutableStateOf(false) }
     var shareOpen by remember { mutableStateOf(false) }
     var sharing by remember { mutableStateOf(false) }
+    // How far the shared video has got, 0..1, while one is being drawn.
+    var shareProgress by remember { mutableStateOf<Float?>(null) }
     // -1 until the person steps through landings: then the middle one shows.
     var landingIndex by rememberSaveable { mutableIntStateOf(-1) }
     val scope = rememberCoroutineScope()
@@ -207,6 +215,7 @@ fun ResultScreen(id: String, onBack: () -> Unit, onReanalyse: () -> Unit) {
                 landingIndex = shownLanding(result, landingIndex),
                 onLandingIndex = { landingIndex = it },
                 onRecalculated = { reloads++ },
+                onCompare = onCompare,
             )
             notFound -> Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Text("This session no longer exists.")
@@ -227,10 +236,13 @@ fun ResultScreen(id: String, onBack: () -> Unit, onReanalyse: () -> Unit) {
             }?.plus(1),
             // Null when the video has been removed to save space.
             videoMb = video.takeIf { it.exists() }?.let { it.length() / 1_048_576.0 },
+            canOverlay = video.exists() && shareData.pose != null,
             busy = sharing,
+            progress = shareProgress,
             onDismiss = { if (!sharing) shareOpen = false },
-            onShare = { withLanding, withVideo ->
+            onShare = { withLanding, withVideo, withOverlay, withReport ->
                 sharing = true
+                shareProgress = null
                 scope.launch {
                     val session = shareData.session
                     val result = withContext(Dispatchers.IO) {
@@ -238,11 +250,13 @@ fun ResultScreen(id: String, onBack: () -> Unit, onReanalyse: () -> Unit) {
                             val feedback = Coach.review(session.metrics!!, session.speedKmh, shareData.previous)
                             ResultSharer.prepare(
                                 context, session, feedback, shareData.pose, video,
-                                ResultSharer.Options(landing.takeIf { withLanding }, withVideo),
+                                ResultSharer.Options(landing.takeIf { withLanding }, withVideo, withOverlay, withReport),
+                                onProgress = { shareProgress = it },
                             )
                         }
                     }
                     sharing = false
+                    shareProgress = null
                     shareOpen = false
                     result
                         .onSuccess { context.startActivity(it) }
@@ -280,12 +294,16 @@ private fun shownLanding(data: ResultData, picked: Int): Int {
 private fun ShareDialog(
     landingNumber: Int?,
     videoMb: Double?,
+    canOverlay: Boolean,
     busy: Boolean,
+    progress: Float?,
     onDismiss: () -> Unit,
-    onShare: (withLanding: Boolean, withVideo: Boolean) -> Unit,
+    onShare: (withLanding: Boolean, withVideo: Boolean, withOverlay: Boolean, withReport: Boolean) -> Unit,
 ) {
     var withLanding by rememberSaveable { mutableStateOf(landingNumber != null) }
     var withVideo by rememberSaveable { mutableStateOf(false) }
+    var withOverlay by rememberSaveable { mutableStateOf(false) }
+    var withReport by rememberSaveable { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Share your results") },
@@ -300,10 +318,25 @@ private fun ShareDialog(
                         enabled = !busy,
                     ) { withLanding = it }
                 }
+                ShareOption("Written report (PDF)", "Every measurement and tip, with up to three landings", withReport, enabled = !busy) { withReport = it }
                 if (videoMb == null) {
                     ShareOption("The video clip", "Removed to save space", false, enabled = false) {}
                 } else {
                     ShareOption("The video clip", "%.0f MB".format(videoMb.coerceAtLeast(1.0)), withVideo, enabled = !busy) { withVideo = it }
+                    ShareOption(
+                        "The clip with your skeleton drawn on",
+                        if (canOverlay) "Made on your phone, which takes about as long as the clip" else "Needs the analysed poses",
+                        withOverlay && canOverlay,
+                        enabled = !busy && canOverlay,
+                    ) { withOverlay = it }
+                }
+                if (busy) {
+                    Spacer(Modifier.height(4.dp))
+                    if (progress != null) {
+                        LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+                    } else {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
                 }
                 Text(
                     "You pick the app it goes to. Stride Lab itself never uploads anything.",
@@ -313,7 +346,10 @@ private fun ShareDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onShare(withLanding && landingNumber != null, withVideo) }, enabled = !busy) {
+            TextButton(
+                onClick = { onShare(withLanding && landingNumber != null, withVideo, withOverlay && canOverlay, withReport) },
+                enabled = !busy,
+            ) {
                 if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Share")
             }
         },
@@ -347,6 +383,7 @@ private fun ResultContent(
     landingIndex: Int,
     onLandingIndex: (Int) -> Unit,
     onRecalculated: () -> Unit,
+    onCompare: () -> Unit,
 ) {
     val session = data.session
     val metrics = session.metrics
@@ -383,6 +420,13 @@ private fun ResultContent(
                 }
             }
         }
+        if (hasVideo && metrics != null && data.pose != null && metrics.contactFrames.size >= 3) {
+            item {
+                FilledTonalButton(onClick = onCompare, modifier = Modifier.fillMaxWidth()) {
+                    Text("Compare with another clip")
+                }
+            }
+        }
         item {
             val context = LocalContext.current
             val settings = remember { CoachSettings(context) }
@@ -405,6 +449,9 @@ private fun ResultContent(
                     onIndex = onLandingIndex,
                 )
             }
+        }
+        if (metrics?.footStrikeSummary != null) {
+            item { FootStrikeCard(metrics) }
         }
         if (metrics != null && data.pose != null) {
             item { ScaleCard(session, metrics.estimatedHeightCm, onRecalculated) }
@@ -489,6 +536,79 @@ private fun Summary(session: Session, feedback: List<Feedback>, plan: FocusPlan?
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun FootStrikeCard(metrics: GaitMetrics) {
+    val summary = metrics.footStrikeSummary ?: return
+    LabCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionLabel("Foot strike pattern")
+            Text(summary, style = MaterialTheme.typography.titleMedium)
+            val heel = (metrics.heelStrikeRatio ?: 0.0).toFloat()
+            val midfoot = (metrics.midfootStrikeRatio ?: 0.0).toFloat()
+            val forefoot = (metrics.forefootStrikeRatio ?: 0.0).toFloat()
+            Canvas(
+                Modifier
+                    .fillMaxWidth()
+                    .height(14.dp)
+                    .clip(MaterialTheme.shapes.small),
+            ) {
+                val w = size.width
+                val h = size.height
+                var startX = 0f
+                if (heel > 0) {
+                    val segmentW = w * heel
+                    drawRect(Signal.Info, Offset(startX, 0f), Size(segmentW, h))
+                    startX += segmentW
+                }
+                if (midfoot > 0) {
+                    val segmentW = w * midfoot
+                    drawRect(Signal.Good, Offset(startX, 0f), Size(segmentW, h))
+                    startX += segmentW
+                }
+                if (forefoot > 0) {
+                    val segmentW = w * forefoot
+                    drawRect(Signal.Improve, Offset(startX, 0f), Size(segmentW, h))
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                if (heel > 0) {
+                    FootStrikeChip(Signal.Info, "${(heel * 100).roundToInt()}% Heel")
+                }
+                if (midfoot > 0) {
+                    FootStrikeChip(Signal.Good, "${(midfoot * 100).roundToInt()}% Midfoot")
+                }
+                if (forefoot > 0) {
+                    FootStrikeChip(Signal.Improve, "${(forefoot * 100).roundToInt()}% Forefoot")
+                }
+            }
+            val note = when (metrics.primaryStrikeType) {
+                FootStrikeType.HEEL -> "Mainly heel striking. Very common for distance runners; keeping your foot landing close under your hips helps absorb shock naturally."
+                FootStrikeType.MIDFOOT -> "Mainly midfoot striking. Distributes ground impact evenly across your foot and lower leg."
+                FootStrikeType.FOREFOOT -> "Mainly forefoot striking. Puts more load on your calves and Achilles; ensure a relaxed contact and allow the heel to settle gently."
+                null -> ""
+            }
+            if (note.isNotEmpty()) {
+                Text(
+                    note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FootStrikeChip(color: androidx.compose.ui.graphics.Color, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(color))
+        Text(text, style = MaterialTheme.typography.labelSmall)
     }
 }
 
@@ -673,12 +793,17 @@ private fun VideoReplay(
     ghost: GhostAligner?,
 ) {
     val context = LocalContext.current
+    val firstContactMs = remember(contactFrames, playbackFps) {
+        val f = contactFrames.firstOrNull() ?: 0
+        frameStartMs(f, playbackFps)
+    }
     val player = remember {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(Uri.fromFile(video)))
             repeatMode = Player.REPEAT_MODE_ALL
             volume = 0f
             prepare()
+            if (firstContactMs > 0) seekTo(firstContactMs)
             playWhenReady = true
         }
     }
@@ -766,7 +891,7 @@ private fun VideoReplay(
 }
 
 @Composable
-private fun SkeletonOverlay(
+internal fun SkeletonOverlay(
     track: PoseTrack,
     frame: Int,
     contactFrames: List<Int>,
@@ -801,10 +926,63 @@ private fun SkeletonOverlay(
         Landmark.CENTER_CONNECTIONS.forEach { (a, b) -> limb(Color.White, a, b) }
         if (!pose.x[Landmark.NOSE].isNaN()) drawCircle(Color.White, radius = 5.dp.toPx(), center = point(Landmark.NOSE))
 
-        // Ring the landing foot for a moment at each detected foot strike.
-        if (contactFrames.any { abs(it - frame) <= landingWindow }) {
-            val heel = if (pose.y[Landmark.LEFT_HEEL] >= pose.y[Landmark.RIGHT_HEEL]) Landmark.LEFT_ANKLE else Landmark.RIGHT_ANKLE
-            if (!pose.x[heel].isNaN()) drawCircle(LandingColor, radius = 14.dp.toPx(), center = point(heel), style = Stroke(stroke))
+        // Ring the landing foot for a moment at each detected foot strike with an impact pulse.
+        val closestContact = contactFrames.minByOrNull { abs(it - frame) }
+        if (closestContact != null) {
+            val dist = abs(closestContact - frame)
+            val window = (playbackFps * 0.18f).roundToInt().coerceAtLeast(3)
+            if (dist <= window) {
+                val frac = dist.toFloat() / window // 0.0 right at contact, up to 1.0
+                // Side-on: determine which foot is landing using the front foot / lower foot
+                val lAnkleX = pose.x[Landmark.LEFT_ANKLE]
+                val rAnkleX = pose.x[Landmark.RIGHT_ANKLE]
+                val noseAhead = pose.x[Landmark.NOSE] - (pose.x[Landmark.LEFT_EAR] + pose.x[Landmark.RIGHT_EAR]) / 2f
+                val leanAhead = (pose.x[Landmark.LEFT_SHOULDER] + pose.x[Landmark.RIGHT_SHOULDER]) / 2f -
+                    (pose.x[Landmark.LEFT_HIP] + pose.x[Landmark.RIGHT_HIP]) / 2f
+                val facing = if (!noseAhead.isNaN() && abs(noseAhead) > 0.001f) kotlin.math.sign(noseAhead) else if (leanAhead < 0) -1f else 1f
+                val isLeft = if (!lAnkleX.isNaN() && !rAnkleX.isNaN()) {
+                    facing * lAnkleX >= facing * rAnkleX
+                } else {
+                    pose.y[Landmark.LEFT_HEEL] >= pose.y[Landmark.RIGHT_HEEL]
+                }
+                val heel = if (isLeft) Landmark.LEFT_HEEL else Landmark.RIGHT_HEEL
+                val toe = if (isLeft) Landmark.LEFT_FOOT_INDEX else Landmark.RIGHT_FOOT_INDEX
+                val ankle = if (isLeft) Landmark.LEFT_ANKLE else Landmark.RIGHT_ANKLE
+
+                // Determine precise contact strike zone: heel strike, forefoot/toe strike, or midfoot
+                val contactPoint = when {
+                    !pose.y[heel].isNaN() && !pose.y[toe].isNaN() -> {
+                        val heelY = pose.y[heel]
+                        val toeY = pose.y[toe]
+                        // Positive y is down towards the treadmill belt
+                        if (heelY - toeY > 0.015f) {
+                            // Heel strikes first
+                            point(heel)
+                        } else if (toeY - heelY > 0.015f) {
+                            // Forefoot / toe strikes first
+                            point(toe)
+                        } else {
+                            // Midfoot strike (halfway between heel and toe)
+                            Offset((point(heel).x + point(toe).x) / 2f, (point(heel).y + point(toe).y) / 2f)
+                        }
+                    }
+                    !pose.x[heel].isNaN() -> point(heel)
+                    !pose.x[toe].isNaN() -> point(toe)
+                    !pose.x[ankle].isNaN() -> point(ankle)
+                    else -> null
+                }
+
+                if (contactPoint != null) {
+                    val centre = contactPoint
+                    val innerRadius = 10.dp.toPx()
+                    val outerRadius = (16 + 28 * frac).dp.toPx()
+                    val alpha = (1f - frac).coerceIn(0f, 1f)
+                    // High-visibility ground impact flash & expanding ripple ring
+                    drawCircle(LandingColor.copy(alpha = 0.45f * alpha), radius = innerRadius, center = centre)
+                    drawCircle(LandingColor.copy(alpha = 1f * alpha), radius = innerRadius, center = centre, style = Stroke(stroke * 1.5f))
+                    drawCircle(LandingColor.copy(alpha = 0.85f * alpha), radius = outerRadius, center = centre, style = Stroke(stroke))
+                }
+            }
         }
     }
 }
@@ -829,7 +1007,7 @@ private fun BadgePill(badge: Badge) {
  * The pose frame showing at [positionMs]. The player reports whole milliseconds, rounded down, so a
  * frame starting at 16.7 ms shows as 16 ms; the extra millisecond keeps that on the right frame.
  */
-private fun frameAt(positionMs: Long, fps: Float) = ((positionMs + 1) * fps / 1000.0).toInt()
+internal fun frameAt(positionMs: Long, fps: Float) = ((positionMs + 1) * fps / 1000.0).toInt()
 
 /** A position just inside frame [frame], for stepping one frame at a time. */
-private fun frameStartMs(frame: Int, fps: Float) = kotlin.math.ceil(frame * 1000.0 / fps).toLong()
+internal fun frameStartMs(frame: Int, fps: Float) = kotlin.math.ceil(frame * 1000.0 / fps).toLong()

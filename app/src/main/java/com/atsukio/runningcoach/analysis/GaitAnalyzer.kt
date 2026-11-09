@@ -7,6 +7,14 @@ import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.roundToInt
 
+/** Running foot strike classification: heel, midfoot, or forefoot/toes first. */
+@Serializable
+enum class FootStrikeType {
+    HEEL,
+    MIDFOOT,
+    FOREFOOT,
+}
+
 /** Running-form measurements from one clip. Any metric that couldn't be measured is null. */
 @Serializable
 data class GaitMetrics(
@@ -33,7 +41,41 @@ data class GaitMetrics(
     val estimatedHeightCm: Double? = null,
     /** True when distances were scaled from the treadmill belt rather than the runner's height setting. */
     val scaledFromTreadmill: Boolean = false,
-)
+    /** Share of foot landings that struck on the heel (0.0 to 1.0). */
+    val heelStrikeRatio: Double? = null,
+    /** Share of foot landings that struck on the midfoot (0.0 to 1.0). */
+    val midfootStrikeRatio: Double? = null,
+    /** Share of foot landings that struck on the forefoot/toes (0.0 to 1.0). */
+    val forefootStrikeRatio: Double? = null,
+    /** Classified strike type for each contact in [contactFrames], aligned by index. */
+    val footStrikes: List<FootStrikeType> = emptyList(),
+) {
+    /** Text summary of foot strike pattern, e.g. "75% Heel · 25% Midfoot". */
+    val footStrikeSummary: String?
+        get() {
+            if (heelStrikeRatio == null || midfootStrikeRatio == null || forefootStrikeRatio == null) return null
+            val parts = mutableListOf<String>()
+            val h = (heelStrikeRatio * 100).roundToInt()
+            val m = (midfootStrikeRatio * 100).roundToInt()
+            val f = (forefootStrikeRatio * 100).roundToInt()
+            if (h > 0) parts.add("$h% Heel")
+            if (m > 0) parts.add("$m% Midfoot")
+            if (f > 0) parts.add("$f% Forefoot")
+            return if (parts.isEmpty()) null else parts.joinToString(" · ")
+        }
+
+    /** The most frequent foot strike type across the analysed landings. */
+    val primaryStrikeType: FootStrikeType?
+        get() {
+            if (heelStrikeRatio == null || midfootStrikeRatio == null || forefootStrikeRatio == null) return null
+            val maxRatio = maxOf(heelStrikeRatio, midfootStrikeRatio, forefootStrikeRatio)
+            return when (maxRatio) {
+                heelStrikeRatio -> FootStrikeType.HEEL
+                forefootStrikeRatio -> FootStrikeType.FOREFOOT
+                else -> FootStrikeType.MIDFOOT
+            }
+        }
+}
 
 sealed interface GaitResult {
     data class Success(val metrics: GaitMetrics, val warnings: List<String>) : GaitResult
@@ -219,6 +261,24 @@ object GaitAnalyzer {
             warnings += "The step rate looks very low. If this was a slow-motion video, the timings may be off."
         }
 
+        val strikes = times.mapIndexed { i, t ->
+            val side = sides[i] ?: return@mapIndexed null
+            val heel = s.pointAt(side.heel, t)
+            val toe = s.pointAt(side.toe, t)
+            classifyStrike(heel, toe, legPx)
+        }
+        val validStrikes = strikes.filterNotNull()
+        val totalStrikes = validStrikes.size
+        val (heelRatio, midfootRatio, forefootRatio) = if (totalStrikes > 0) {
+            Triple(
+                validStrikes.count { it == FootStrikeType.HEEL }.toDouble() / totalStrikes,
+                validStrikes.count { it == FootStrikeType.MIDFOOT }.toDouble() / totalStrikes,
+                validStrikes.count { it == FootStrikeType.FOREFOOT }.toDouble() / totalStrikes,
+            )
+        } else {
+            Triple(null, null, null)
+        }
+
         val overstrideMedian = overstride.median()
         val metrics = GaitMetrics(
             cadenceSpm = cadence,
@@ -236,8 +296,23 @@ object GaitAnalyzer {
             contactTimes = times,
             estimatedHeightCm = estimatedHeight,
             scaledFromTreadmill = estimatedHeight != null,
+            heelStrikeRatio = heelRatio,
+            midfootStrikeRatio = midfootRatio,
+            forefootStrikeRatio = forefootRatio,
+            footStrikes = strikes.map { it ?: FootStrikeType.MIDFOOT },
         )
         return GaitResult.Success(metrics, warnings)
+    }
+
+    /** Classifies a single landing as heel, midfoot or forefoot from the heel and toe heights at contact. */
+    internal fun classifyStrike(heel: Vec2, toe: Vec2, legPx: Double): FootStrikeType? {
+        if (!heel.isValid || !toe.isValid || legPx <= 1e-4) return null
+        val diff = (heel.y - toe.y) / legPx
+        return when {
+            diff > 0.025 -> FootStrikeType.HEEL
+            diff < -0.025 -> FootStrikeType.FOREFOOT
+            else -> FootStrikeType.MIDFOOT
+        }
     }
 
     /**

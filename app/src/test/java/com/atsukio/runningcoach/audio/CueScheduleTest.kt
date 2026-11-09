@@ -42,4 +42,18 @@ class CueScheduleTest {
         val feedback = Coach.review(metrics(5.0, 0.06), null)
         if (Coach.mainFocus(feedback) == null) assertNull(CueSchedule.cue(null, feedback))
     }
+
+    @Test
+    fun speaksTailoredCueWhenOverstrideHasHeavyHeelStrike() {
+        val m = metrics(35.0, 0.40).copy(heelStrikeRatio = 0.85, midfootStrikeRatio = 0.15, forefootStrikeRatio = 0.0)
+        val feedback = Coach.review(m, 10.0)
+        assertEquals("Land softly under your hips.", CueSchedule.cue(null, feedback))
+    }
+
+    @Test
+    fun speaksFootStrikeCueWhenFormIsOtherwiseGood() {
+        val m = metrics(5.0, 0.06).copy(heelStrikeRatio = 0.0, midfootStrikeRatio = 0.10, forefootStrikeRatio = 0.90)
+        val feedback = Coach.review(m, 10.0)
+        assertEquals("Let the heel kiss the ground", CueSchedule.cue(null, feedback))
+    }
 }

@@ -56,9 +56,9 @@ internal object SessionBuilder {
     /**
      * Raised whenever a change to the measuring code moves the figures, so older clips can be measured again
      * and trends compare like with like. 1: landings measured between frames. 2: the landing foot is the front
-     * one, and left/right balance compares medians.
+     * one, and left/right balance compares medians. 3: foot strike ratio and classification.
      */
-    const val MEASURE_VERSION = 2
+    const val MEASURE_VERSION = 3
 
     /** The speed and height a person may type for one clip: a speed of 3 to 30 km/h (or none) and a height of 120 to 220 cm. */
     fun validSpeed(kmh: Double?): Boolean = kmh == null || kmh in 3.0..30.0

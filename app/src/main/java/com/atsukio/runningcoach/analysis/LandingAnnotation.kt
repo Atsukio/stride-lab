@@ -16,6 +16,8 @@ data class LandingAnnotation(
     val hip: Point,
     val knee: Point,
     val ankle: Point,
+    val heel: Point? = null,
+    val toe: Point? = null,
     /** How far in front of the hips the foot lands; negative means under or behind them. */
     val overstrideCm: Double?,
     /** Shin tilt from vertical, positive when the foot is ahead of the knee. */
@@ -24,7 +26,68 @@ data class LandingAnnotation(
     val kneeFlexionDeg: Double,
     /** Trunk lean from vertical, positive forwards. */
     val leanDeg: Double,
+    /** Which way the runner faces: +1 for right, -1 for left. */
+    val facing: Double = 1.0,
+    /** Foot strike classification: heel, midfoot or forefoot. */
+    val strike: FootStrikeType? = null,
 ) {
+    /**
+     * An idealized target landing based on the runner's own leg length and hip position:
+     * foot placed under the body (good coaching range) with a softly flexed knee and vertical shin.
+     */
+    fun ideal(targetOverstrideCm: Double = 3.0, legCm: Double? = null): LandingAnnotation {
+        val h = Vec2(hip.x.toDouble(), hip.y.toDouble())
+        val a = Vec2(ankle.x.toDouble(), ankle.y.toDouble())
+        val k = Vec2(knee.x.toDouble(), knee.y.toDouble())
+        val thighLen = (k - h).length
+        val shinLen = (a - k).length
+        val currentLegNorm = thighLen + shinLen
+        if (currentLegNorm <= 1e-4) return this
+
+        // If legCm is known, convert targetOverstrideCm to normalized units, otherwise use ~6% of leg length
+        val targetAheadNorm = if (legCm != null && legCm > 1e-4) {
+            (targetOverstrideCm / legCm) * currentLegNorm
+        } else {
+            currentLegNorm * 0.06
+        }
+
+        val targetAnkleX = h.x + facing * targetAheadNorm
+        val targetAnkleY = a.y // Maintain detected belt/ground contact plane
+        val targetAnkle = Vec2(targetAnkleX, targetAnkleY)
+
+        // 2-segment inverse kinematics to find target knee pointing forwards in facing direction
+        val d = (targetAnkle - h).length.coerceAtMost((thighLen + shinLen) * 0.999)
+        val u = (targetAnkle - h) * (1.0 / (targetAnkle - h).length.coerceAtLeast(1e-6))
+        // Distance along u to the projection of knee
+        val a1 = ((thighLen * thighLen - shinLen * shinLen + d * d) / (2 * d)).coerceIn(-thighLen, thighLen)
+        val hHeight = kotlin.math.sqrt((thighLen * thighLen - a1 * a1).coerceAtLeast(0.0))
+        val normal = Vec2(u.y, -u.x).let { if (facing * it.x > 0) it else it * -1.0 }
+        val targetKnee = h + u * a1 + normal * hHeight
+
+        val actualTargetCm = if (legCm != null && currentLegNorm > 1e-4) {
+            (targetAnkle.x - h.x) * facing * legCm / currentLegNorm
+        } else {
+            targetOverstrideCm
+        }
+        val targetShin = Math.toDegrees(atan2((targetAnkle.x - targetKnee.x) * facing, targetAnkle.y - targetKnee.y))
+        val targetKneeFlex = 180.0 - angleAt(targetKnee, h, targetAnkle)
+
+        return LandingAnnotation(
+            shoulder = shoulder,
+            hip = hip,
+            knee = Point(targetKnee.x.toFloat(), targetKnee.y.toFloat()),
+            ankle = Point(targetAnkle.x.toFloat(), targetAnkle.y.toFloat()),
+            heel = Point(targetAnkle.x.toFloat() - (facing * 0.015f).toFloat(), targetAnkle.y.toFloat() + 0.005f),
+            toe = Point(targetAnkle.x.toFloat() + (facing * 0.035f).toFloat(), targetAnkle.y.toFloat() + 0.005f),
+            overstrideCm = actualTargetCm,
+            shinDeg = targetShin,
+            kneeFlexionDeg = targetKneeFlex,
+            leanDeg = leanDeg,
+            facing = facing,
+            strike = FootStrikeType.MIDFOOT,
+        )
+    }
+
     companion object {
         /**
          * The annotation for [frame] of a cleaned track, using the lower foot as the landing one.
@@ -43,6 +106,7 @@ data class LandingAnnotation(
                 shinDeg = measured.shinDeg,
                 kneeFlexionDeg = measured.kneeFlexionDeg,
                 leanDeg = measured.leanDeg,
+                strike = measured.strike ?: drawn.strike,
             )
         }
 
@@ -72,10 +136,14 @@ data class LandingAnnotation(
             val hipI = if (left) Landmark.LEFT_HIP else Landmark.RIGHT_HIP
             val kneeI = if (left) Landmark.LEFT_KNEE else Landmark.RIGHT_KNEE
             val ankleI = if (left) Landmark.LEFT_ANKLE else Landmark.RIGHT_ANKLE
+            val heelI = if (left) Landmark.LEFT_HEEL else Landmark.RIGHT_HEEL
+            val toeI = if (left) Landmark.LEFT_FOOT_INDEX else Landmark.RIGHT_FOOT_INDEX
             val hip = midpoint(px(Landmark.LEFT_HIP), px(Landmark.RIGHT_HIP))
             val shoulder = midpoint(px(Landmark.LEFT_SHOULDER), px(Landmark.RIGHT_SHOULDER))
             val knee = px(kneeI)
             val ankle = px(ankleI)
+            val heel = px(heelI)
+            val toe = px(toeI)
             val nose = px(Landmark.NOSE)
             val ears = midpoint(px(Landmark.LEFT_EAR), px(Landmark.RIGHT_EAR))
             if (listOf(hip, shoulder, knee, ankle, px(hipI)).any { !it.isValid }) return null
@@ -89,16 +157,25 @@ data class LandingAnnotation(
             val overstride = legCm?.takeIf { legPx > 1 }?.let { (ankle.x - hip.x) * facing * it / legPx }
             val shin = Math.toDegrees(atan2((ankle.x - knee.x) * facing, ankle.y - knee.y))
             val lean = Math.toDegrees(atan2((shoulder.x - hip.x) * facing, hip.y - shoulder.y))
+            val strike = if (heel.isValid && toe.isValid && legPx > 1) {
+                GaitAnalyzer.classifyStrike(heel, toe, legPx)
+            } else {
+                null
+            }
             fun norm(v: Vec2) = Point((v.x / track.width).toFloat(), (v.y / track.height).toFloat())
             return LandingAnnotation(
                 shoulder = norm(shoulder),
                 hip = norm(hip),
                 knee = norm(knee),
                 ankle = norm(ankle),
+                heel = if (heel.isValid) norm(heel) else null,
+                toe = if (toe.isValid) norm(toe) else null,
                 overstrideCm = overstride,
                 shinDeg = shin,
                 kneeFlexionDeg = 180 - angleAt(knee, px(hipI), ankle),
                 leanDeg = lean,
+                facing = facing,
+                strike = strike,
             )
         }
     }

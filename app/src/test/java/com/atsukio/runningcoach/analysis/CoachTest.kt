@@ -30,4 +30,17 @@ class CoachScaleTest {
         val overstride = Coach.review(metrics(30.0, 0.35, 170.0), speedKmh = 10.0).first { it.topic == "Overstriding" }
         assertEquals(85.7 * 0.18, overstride.scale!!.goodHigh, 0.1)
     }
+
+    @Test
+    fun footStrikeFeedbackGivesHelpfulContextWithoutMedicalClaims() {
+        val m = metrics(overstrideCm = 30.0, ratio = 0.35, cadence = 150.0).copy(
+            heelStrikeRatio = 0.85,
+            midfootStrikeRatio = 0.15,
+            forefootStrikeRatio = 0.0,
+        )
+        val feedback = Coach.review(m, speedKmh = 10.0).first { it.topic == "Foot strike" }
+        assertEquals("85% Heel · 15% Midfoot", feedback.value)
+        assertEquals(FeedbackStatus.INFO, feedback.status)
+        assertTrue(feedback.message.contains("heel"))
+    }
 }

@@ -10,6 +10,7 @@ import com.atsukio.runningcoach.analysis.Coach
 import com.atsukio.runningcoach.share.LandingStill
 import com.atsukio.runningcoach.share.ResultSharer
 import com.atsukio.runningcoach.share.ShareCard
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -36,10 +37,12 @@ class ShareTest {
 
     @Test
     fun theShareIntentCarriesAReadableImageAndATextSummary() {
-        val chooser = ResultSharer.prepare(
-            context, session, feedback, pose = null, video = File(context.cacheDir, "missing.mp4"),
-            options = ResultSharer.Options(landingIndex = null, includeVideo = false),
-        )
+        val chooser = runBlocking {
+            ResultSharer.prepare(
+                context, session, feedback, pose = null, video = File(context.cacheDir, "missing.mp4"),
+                options = ResultSharer.Options(landingIndex = null, includeVideo = false),
+            )
+        }
         assertEquals(Intent.ACTION_CHOOSER, chooser.action)
         @Suppress("DEPRECATION")
         val send = chooser.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)!!
@@ -58,8 +61,10 @@ class ShareTest {
     fun onlyTheLatestShareIsKept() {
         val options = ResultSharer.Options(landingIndex = null, includeVideo = false)
         val video = File(context.cacheDir, "missing.mp4")
-        ResultSharer.prepare(context, session, feedback, null, video, options)
-        ResultSharer.prepare(context, Fixtures.session("share-test-2", createdAt = 1_000), feedback, null, video, options)
+        runBlocking {
+            ResultSharer.prepare(context, session, feedback, null, video, options)
+            ResultSharer.prepare(context, Fixtures.session("share-test-2", createdAt = 1_000), feedback, null, video, options)
+        }
         val files = File(context.cacheDir, "shared").listFiles().orEmpty()
         assertEquals(1, files.size)
     }

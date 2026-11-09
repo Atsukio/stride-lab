@@ -1,6 +1,7 @@
 package com.atsukio.runningcoach.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,6 +11,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -30,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -62,6 +66,7 @@ private val PROGRESS_METRICS = listOf(
     ProgressMetric("Bounce", "cm", setOf("Bounce")) { it.verticalOscillationCm },
     ProgressMetric("Lean", "°", setOf("Posture")) { it.trunkLeanDeg },
     ProgressMetric("Elbow angle", "°", setOf("Arms")) { it.elbowAngleDeg },
+    ProgressMetric("Heel strike", "%", setOf("Foot strike")) { it.heelStrikeRatio?.let { r -> r * 100 } },
 )
 
 /** One analysed clip on a trend: when, at what speed, and its value. */
@@ -103,6 +108,12 @@ fun TrendsScreen(onBack: () -> Unit) {
                         "pace, so compare clips at similar speeds.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
+            }
+            item {
+                val strikeClips = list.filter { it.metrics?.heelStrikeRatio != null }
+                if (strikeClips.size >= 2) {
+                    FootStrikeTrendCard(strikeClips)
+                }
             }
             items(PROGRESS_METRICS) { metric ->
                 val points = list.mapNotNull { s -> metric.value(s.metrics!!)?.let { ProgressPoint(s, it) } }
@@ -160,5 +171,86 @@ private fun ProgressCard(metric: ProgressMetric, points: List<ProgressPoint>) {
                 Text(dates.format(Date(latest.session.createdAt)), style = MaterialTheme.typography.bodySmall)
             }
         }
+    }
+}
+
+@Composable
+private fun FootStrikeTrendCard(clips: List<Session>) {
+    val first = clips.first()
+    val latest = clips.last()
+    val dates = DateFormat.getDateInstance(DateFormat.MEDIUM)
+    val latestSummary = latest.metrics?.footStrikeSummary ?: return
+
+    LabCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Foot strike evolution", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Text(latestSummary, style = MaterialTheme.typography.labelMedium)
+            }
+            val grid = MaterialTheme.colorScheme.outlineVariant
+            Canvas(
+                Modifier
+                    .fillMaxWidth()
+                    .height(110.dp)
+                    .semantics {
+                        contentDescription = "Foot strike trend over ${clips.size} clips: latest $latestSummary"
+                    },
+            ) {
+                val n = clips.size
+                val barWidth = (size.width / (n * 2f)).coerceIn(8.dp.toPx(), 28.dp.toPx())
+                val spacing = size.width / n
+                val radius = CornerRadius(4.dp.toPx())
+
+                drawLine(grid, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
+
+                clips.forEachIndexed { i, s ->
+                    val m = s.metrics ?: return@forEachIndexed
+                    val heel = (m.heelStrikeRatio ?: 0.0).toFloat()
+                    val midfoot = (m.midfootStrikeRatio ?: 0.0).toFloat()
+                    val forefoot = (m.forefootStrikeRatio ?: 0.0).toFloat()
+                    val x = i * spacing + (spacing - barWidth) / 2f
+                    var currentY = size.height
+
+                    // Background track for the bar
+                    drawRoundRect(grid.copy(alpha = 0.25f), Offset(x, 0f), Size(barWidth, size.height), radius)
+
+                    if (heel > 0) {
+                        val h = heel * size.height
+                        currentY -= h
+                        drawRect(Signal.Info, Offset(x, currentY), Size(barWidth, h))
+                    }
+                    if (midfoot > 0) {
+                        val h = midfoot * size.height
+                        currentY -= h
+                        drawRect(Signal.Good, Offset(x, currentY), Size(barWidth, h))
+                    }
+                    if (forefoot > 0) {
+                        val h = forefoot * size.height
+                        currentY -= h
+                        drawRect(Signal.Improve, Offset(x, currentY), Size(barWidth, h))
+                    }
+                }
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                StrikeLegendDot(Signal.Info, "Heel")
+                StrikeLegendDot(Signal.Good, "Midfoot")
+                StrikeLegendDot(Signal.Improve, "Forefoot")
+            }
+            Row {
+                Text(dates.format(Date(first.createdAt)), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                Text(dates.format(Date(latest.createdAt)), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@Composable
+private fun StrikeLegendDot(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.size(8.dp).background(color, CircleShape))
+        Text(label, style = MaterialTheme.typography.bodySmall)
     }
 }

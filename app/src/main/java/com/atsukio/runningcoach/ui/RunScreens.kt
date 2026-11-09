@@ -266,6 +266,7 @@ private enum class TrendMetric(val label: String, val unit: String, val value: (
     CADENCE("Cadence", "steps/min", { it.cadenceSpm }),
     BOUNCE("Bounce", "cm", { it.verticalOscillationCm }),
     LEAN("Lean", "°", { it.trunkLeanDeg }),
+    HEEL_STRIKE("Heel strike", "%", { it.heelStrikeRatio?.let { r -> r * 100 } }),
 }
 
 /** How form changed over a finished run, alongside heart rate. */

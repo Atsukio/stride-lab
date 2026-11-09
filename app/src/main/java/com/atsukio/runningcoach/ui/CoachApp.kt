@@ -123,7 +123,11 @@ fun CoachApp() {
                 id = id,
                 onBack = { nav.popBackStack() },
                 onReanalyse = { nav.navigate("analyse/$id?reanalyse=true") },
+                onCompare = { nav.navigate("compare/$id") },
             )
+        }
+        composable("compare/{id}") { entry ->
+            CompareScreen(id = entry.arguments?.getString("id").orEmpty(), onBack = { nav.popBackStack() })
         }
         composable("about") {
             AboutScreen(onBack = { nav.popBackStack() }, onOpenStorage = { nav.navigate("storage") })

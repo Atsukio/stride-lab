@@ -87,7 +87,7 @@ class GhostAligner private constructor(
         }
 
         /** +1 when the runner faces right, -1 when left, from where the nose sits relative to the hips. */
-        private fun facing(track: PoseTrack): Double {
+        internal fun facing(track: PoseTrack): Double {
             val offsets = track.frames.filterNotNull().mapNotNull { pose ->
                 val hip = hip(pose, track.width, track.height) ?: return@mapNotNull null
                 if (pose.x[Landmark.NOSE].isNaN()) null else pose.x[Landmark.NOSE] * track.width - hip.first

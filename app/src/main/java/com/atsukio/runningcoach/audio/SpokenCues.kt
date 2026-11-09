@@ -20,9 +20,9 @@ object CueSchedule {
     fun dueIndex(elapsedSec: Double): Int =
         if (elapsedSec < FIRST_CUE_SEC) -1 else ((elapsedSec - FIRST_CUE_SEC) / EVERY_SEC).toInt()
 
-    /** What to say: the focus plan's cue if there is one, otherwise the main focus of the latest clip. */
+    /** What to say: the focus plan's cue if there is one, otherwise the main focus or foot strike cue of the latest clip. */
     fun cue(plan: FocusPlan?, latestFeedback: List<Feedback>): String? =
-        plan?.cue ?: Coach.mainFocus(latestFeedback)?.cue
+        plan?.cue ?: Coach.mainFocus(latestFeedback)?.cue ?: latestFeedback.firstOrNull { it.topic == "Foot strike" && it.cue != null }?.cue
 }
 
 /**
