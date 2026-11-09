@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -154,7 +155,7 @@ fun LandingCard(
     LabCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("At landing", style = MaterialTheme.typography.titleMedium)
+                SectionLabel("At landing", icon = LabIcons.Landing)
                 Spacer(Modifier.weight(1f))
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     LandingVisualMode.entries.forEach { m ->
@@ -220,6 +221,25 @@ fun LandingCard(
                         FootStrikeType.FOREFOOT -> "Forefoot strike" to Signal.Improve
                     }
                     Legend(col, "Landing strike: $label")
+                }
+                metrics.footStrikeSummary?.let { summary ->
+                    Row(
+                        Modifier.padding(top = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            LabIcons.FootStrike,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Text(
+                            "Clip overall: $summary",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             } ?: Text(
                 "The runner's leg couldn't be made out on this landing.",

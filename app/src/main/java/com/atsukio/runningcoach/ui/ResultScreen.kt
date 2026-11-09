@@ -47,9 +47,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -153,7 +155,11 @@ fun ResultScreen(id: String, onBack: () -> Unit, onReanalyse: () -> Unit, onComp
 
     LaunchedEffect(id, reloads) {
         val loaded = withContext(Dispatchers.IO) {
-            val session = repo.get(id) ?: return@withContext null
+            var session = repo.get(id) ?: return@withContext null
+            // Re-measure older clips or clips lacking foot strike data if poses are saved
+            if ((session.measureVersion < SessionBuilder.MEASURE_VERSION || session.metrics?.heelStrikeRatio == null) && repo.hasPose(id)) {
+                session = repo.recalculate(id, session.speedKmh, session.runnerHeightCm) ?: session
+            }
             // Newest first, so the first earlier clip is the one just before this.
             val earlier = repo.list().filter { it.createdAt < session.createdAt && it.metrics != null }
             val previous = earlier.firstOrNull()
@@ -375,6 +381,8 @@ private fun ShareOption(title: String, detail: String, checked: Boolean, enabled
     }
 }
 
+private enum class FeedbackFilter { ALL, IMPROVE, GOOD }
+
 @Composable
 private fun ResultContent(
     data: ResultData,
@@ -389,6 +397,22 @@ private fun ResultContent(
     val metrics = session.metrics
     val feedback = remember(session) {
         metrics?.let { Coach.review(it, session.speedKmh, data.previous) }.orEmpty()
+    }
+    var feedbackFilter by rememberSaveable { mutableStateOf(FeedbackFilter.ALL) }
+    val filteredFeedback = remember(feedback, feedbackFilter) {
+        when (feedbackFilter) {
+            FeedbackFilter.ALL -> feedback
+            FeedbackFilter.IMPROVE -> feedback.filter { it.status == FeedbackStatus.IMPROVE }
+            FeedbackFilter.GOOD -> feedback.filter { it.status == FeedbackStatus.GOOD }
+        }
+    }
+    val context = LocalContext.current
+    val settings = remember { CoachSettings(context) }
+    var plan by remember { mutableStateOf(settings.focusPlan) }
+    val onStartPlan: (Feedback) -> Unit = { focus ->
+        val started = FocusPlan.from(focus, System.currentTimeMillis())
+        settings.focusPlan = started
+        plan = started
     }
     LazyColumn(
         contentPadding = PaddingValues(
@@ -428,14 +452,7 @@ private fun ResultContent(
             }
         }
         item {
-            val context = LocalContext.current
-            val settings = remember { CoachSettings(context) }
-            var plan by remember { mutableStateOf(settings.focusPlan) }
-            Summary(session, feedback, plan) { focus ->
-                val started = FocusPlan.from(focus, System.currentTimeMillis())
-                settings.focusPlan = started
-                plan = started
-            }
+            Summary(session, feedback, plan, onStartPlan)
         }
         if (hasVideo && metrics != null && data.pose != null && metrics.contactFrames.isNotEmpty()) {
             item {
@@ -450,30 +467,95 @@ private fun ResultContent(
                 )
             }
         }
-        if (metrics?.footStrikeSummary != null) {
-            item { FootStrikeCard(metrics) }
+        if (metrics != null) {
+            val strikeFocus = feedback.firstOrNull { it.topic == "Foot strike" } ?: Feedback(
+                topic = "Foot strike",
+                value = metrics.footStrikeSummary ?: "Foot strike",
+                status = FeedbackStatus.INFO,
+                message = "Focus on landing lightly under your hips.",
+                cue = "Land softly under your hips.",
+                drill = "Barefoot strides on grass or quick metronome steps.",
+            )
+            item { FootStrikeCard(metrics, strikeFocus, plan, onStartPlan) }
         }
         if (metrics != null && data.pose != null) {
             item { ScaleCard(session, metrics.estimatedHeightCm, onRecalculated) }
         }
-        items(feedback) { FeedbackCard(it, data.badges[measurementKey(it.topic)]) }
+        if (feedback.isNotEmpty()) {
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        SectionLabel("Form breakdown & coaching", icon = LabIcons.Biomechanics)
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            "${feedback.size} metrics",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    val improveCount = feedback.count { it.status == FeedbackStatus.IMPROVE }
+                    val goodCount = feedback.count { it.status == FeedbackStatus.GOOD }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = feedbackFilter == FeedbackFilter.ALL,
+                            onClick = { feedbackFilter = FeedbackFilter.ALL },
+                            label = { Text("All (${feedback.size})") },
+                        )
+                        if (improveCount > 0) {
+                            FilterChip(
+                                selected = feedbackFilter == FeedbackFilter.IMPROVE,
+                                onClick = { feedbackFilter = FeedbackFilter.IMPROVE },
+                                leadingIcon = { StatusDot(good = false) },
+                                label = { Text("To work on ($improveCount)") },
+                            )
+                        }
+                        if (goodCount > 0) {
+                            FilterChip(
+                                selected = feedbackFilter == FeedbackFilter.GOOD,
+                                onClick = { feedbackFilter = FeedbackFilter.GOOD },
+                                leadingIcon = { StatusDot(good = true) },
+                                label = { Text("In range ($goodCount)") },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        items(filteredFeedback) { FeedbackCard(it, data.badges[measurementKey(it.topic)]) }
         if (session.warnings.isNotEmpty()) {
             item {
                 LabCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("About this recording", style = MaterialTheme.typography.titleSmall)
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        SectionLabel("About this recording", icon = Icons.Default.Info)
                         session.warnings.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
                     }
                 }
             }
         }
         item {
-            Text(
-                "These are coaching suggestions based on video, not medical advice. " +
-                    "If something hurts, see a physiotherapist or doctor.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    Icons.Default.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp).padding(top = 2.dp),
+                )
+                Text(
+                    "These are coaching suggestions based on video, not medical advice. " +
+                        "If something hurts, see a physiotherapist or doctor.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -484,27 +566,30 @@ private fun Summary(session: Session, feedback: List<Feedback>, plan: FocusPlan?
     LabCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (failure != null) {
-                Text("Couldn't analyse this clip", style = MaterialTheme.typography.titleMedium)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                    Text("Couldn't analyse this clip", style = MaterialTheme.typography.titleMedium)
+                }
                 Text(failure)
                 FilmingTips()
                 return@Column
             }
             val focus = Coach.mainFocus(feedback)
             if (focus != null) {
-                SectionLabel("Main focus", colour = signalColour(false))
+                SectionLabel("Main focus", colour = signalColour(false), icon = LabIcons.Target)
                 Text(focus.topic, style = MaterialTheme.typography.headlineSmall)
                 focus.cue?.let {
                     Text("Think: \"$it\"", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
                 }
                 if (plan != null && measurementKey(plan.topic) == measurementKey(focus.topic)) {
-                    SectionLabel("In your focus plan", colour = signalColour(true))
+                    SectionLabel("In your focus plan", colour = signalColour(true), icon = Icons.Default.Star)
                 } else {
                     OutlinedButton(onClick = { onStartPlan(focus) }) {
                         Text(if (plan == null) "Start a 3-week plan for this" else "Switch my plan to this")
                     }
                 }
             } else {
-                SectionLabel("All clear", colour = signalColour(true))
+                SectionLabel("All clear", colour = signalColour(true), icon = Icons.Default.Check)
                 Text("Nice running: nothing major to fix", style = MaterialTheme.typography.headlineSmall)
             }
             Row(
@@ -514,6 +599,16 @@ private fun Summary(session: Session, feedback: List<Feedback>, plan: FocusPlan?
                 session.metrics?.let { StatChip("${it.stepCount}", "steps", countUp = true) }
                 session.speedKmh?.let { StatChip(formatSpeed(it), if (session.speedFromSensor) "km/h watch" else "km/h") }
                 StatChip("${session.fps.roundToInt()}", "fps")
+                session.metrics?.let { m ->
+                    val heel = m.heelStrikeRatio
+                    val primary = m.primaryStrikeType
+                    if (heel != null) {
+                        val h = (heel * 100).roundToInt()
+                        StatChip("$h%", "heel strike")
+                    } else if (primary != null) {
+                        StatChip(primary.name.lowercase().replaceFirstChar { it.uppercase() }, "strike")
+                    }
+                }
             }
             session.processingSec?.let {
                 Text(
@@ -540,63 +635,114 @@ private fun Summary(session: Session, feedback: List<Feedback>, plan: FocusPlan?
 }
 
 @Composable
-private fun FootStrikeCard(metrics: GaitMetrics) {
-    val summary = metrics.footStrikeSummary ?: return
+private fun FootStrikeCard(
+    metrics: GaitMetrics,
+    focus: Feedback,
+    plan: FocusPlan?,
+    onStartPlan: (Feedback) -> Unit,
+) {
     LabCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SectionLabel("Foot strike pattern")
-            Text(summary, style = MaterialTheme.typography.titleMedium)
-            val heel = (metrics.heelStrikeRatio ?: 0.0).toFloat()
-            val midfoot = (metrics.midfootStrikeRatio ?: 0.0).toFloat()
-            val forefoot = (metrics.forefootStrikeRatio ?: 0.0).toFloat()
-            Canvas(
-                Modifier
-                    .fillMaxWidth()
-                    .height(14.dp)
-                    .clip(MaterialTheme.shapes.small),
-            ) {
-                val w = size.width
-                val h = size.height
-                var startX = 0f
-                if (heel > 0) {
-                    val segmentW = w * heel
-                    drawRect(Signal.Info, Offset(startX, 0f), Size(segmentW, h))
-                    startX += segmentW
-                }
-                if (midfoot > 0) {
-                    val segmentW = w * midfoot
-                    drawRect(Signal.Good, Offset(startX, 0f), Size(segmentW, h))
-                    startX += segmentW
-                }
-                if (forefoot > 0) {
-                    val segmentW = w * forefoot
-                    drawRect(Signal.Improve, Offset(startX, 0f), Size(segmentW, h))
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                SectionLabel("Foot strike pattern", icon = LabIcons.FootStrike)
+                Spacer(Modifier.weight(1f))
+                metrics.primaryStrikeType?.let { primary ->
+                    val (label, col) = when (primary) {
+                        FootStrikeType.HEEL -> "Mainly Heel" to Signal.Info
+                        FootStrikeType.MIDFOOT -> "Mainly Midfoot" to Signal.Good
+                        FootStrikeType.FOREFOOT -> "Mainly Forefoot" to Signal.Improve
+                    }
+                    Text(label, style = MaterialTheme.typography.labelMedium, color = col)
                 }
             }
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                if (heel > 0) {
-                    FootStrikeChip(Signal.Info, "${(heel * 100).roundToInt()}% Heel")
+            val summary = metrics.footStrikeSummary
+            if (summary != null) {
+                Text(summary, style = MaterialTheme.typography.headlineSmall)
+                val heel = (metrics.heelStrikeRatio ?: 0.0).toFloat()
+                val midfoot = (metrics.midfootStrikeRatio ?: 0.0).toFloat()
+                val forefoot = (metrics.forefootStrikeRatio ?: 0.0).toFloat()
+                val totalSteps = metrics.footStrikes.size.takeIf { it > 0 } ?: metrics.stepCount
+                val heelSteps = (heel * totalSteps).roundToInt()
+                val midfootSteps = (midfoot * totalSteps).roundToInt()
+                val forefootSteps = (forefoot * totalSteps).roundToInt()
+
+                Canvas(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(16.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
+                ) {
+                    val w = size.width
+                    val h = size.height
+                    var startX = 0f
+                    if (heel > 0) {
+                        val segmentW = w * heel
+                        drawRect(Signal.Info, Offset(startX, 0f), Size(segmentW, h))
+                        startX += segmentW
+                    }
+                    if (midfoot > 0) {
+                        val segmentW = w * midfoot
+                        drawRect(Signal.Good, Offset(startX, 0f), Size(segmentW, h))
+                        startX += segmentW
+                    }
+                    if (forefoot > 0) {
+                        val segmentW = w * forefoot
+                        drawRect(Signal.Improve, Offset(startX, 0f), Size(segmentW, h))
+                    }
                 }
-                if (midfoot > 0) {
-                    FootStrikeChip(Signal.Good, "${(midfoot * 100).roundToInt()}% Midfoot")
+
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    StrikeStatCard(
+                        title = "Heel",
+                        ratio = heel,
+                        steps = heelSteps,
+                        color = Signal.Info,
+                        modifier = Modifier.weight(1f),
+                    )
+                    StrikeStatCard(
+                        title = "Midfoot",
+                        ratio = midfoot,
+                        steps = midfootSteps,
+                        color = Signal.Good,
+                        modifier = Modifier.weight(1f),
+                    )
+                    StrikeStatCard(
+                        title = "Forefoot",
+                        ratio = forefoot,
+                        steps = forefootSteps,
+                        color = Signal.Improve,
+                        modifier = Modifier.weight(1f),
+                    )
                 }
-                if (forefoot > 0) {
-                    FootStrikeChip(Signal.Improve, "${(forefoot * 100).roundToInt()}% Forefoot")
+
+                val note = when (metrics.primaryStrikeType) {
+                    FootStrikeType.HEEL -> "Mainly heel striking. Very common for distance runners; keeping your foot landing close under your hips helps absorb shock naturally."
+                    FootStrikeType.MIDFOOT -> "Mainly midfoot striking. Distributes ground impact evenly across your foot and lower leg."
+                    FootStrikeType.FOREFOOT -> "Mainly forefoot striking. Puts more load on your calves and Achilles; ensure a relaxed contact and allow the heel to settle gently."
+                    null -> ""
                 }
-            }
-            val note = when (metrics.primaryStrikeType) {
-                FootStrikeType.HEEL -> "Mainly heel striking. Very common for distance runners; keeping your foot landing close under your hips helps absorb shock naturally."
-                FootStrikeType.MIDFOOT -> "Mainly midfoot striking. Distributes ground impact evenly across your foot and lower leg."
-                FootStrikeType.FOREFOOT -> "Mainly forefoot striking. Puts more load on your calves and Achilles; ensure a relaxed contact and allow the heel to settle gently."
-                null -> ""
-            }
-            if (note.isNotEmpty()) {
+                if (note.isNotEmpty()) {
+                    Text(
+                        note,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (plan != null && measurementKey(plan.topic) == measurementKey(focus.topic)) {
+                    SectionLabel("In your focus plan", colour = signalColour(true), icon = Icons.Default.Star)
+                } else {
+                    OutlinedButton(onClick = { onStartPlan(focus) }) {
+                        Text(if (plan == null) "Start a 3-week plan for foot strike" else "Switch my plan to foot strike")
+                    }
+                }
+            } else {
                 Text(
-                    note,
-                    style = MaterialTheme.typography.bodySmall,
+                    "Foot strike couldn't be classified for this clip. Keep the runner's feet and treadmill belt fully in frame.",
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -605,10 +751,40 @@ private fun FootStrikeCard(metrics: GaitMetrics) {
 }
 
 @Composable
-private fun FootStrikeChip(color: androidx.compose.ui.graphics.Color, text: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Box(Modifier.size(8.dp).clip(CircleShape).background(color))
-        Text(text, style = MaterialTheme.typography.labelSmall)
+private fun StrikeStatCard(
+    title: String,
+    ratio: Float,
+    steps: Int,
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    val pct = (ratio * 100).roundToInt()
+    Column(
+        modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .border(1.dp, if (pct > 0) color.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+            .padding(vertical = 8.dp, horizontal = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Box(Modifier.size(6.dp).clip(CircleShape).background(if (pct > 0) color else color.copy(alpha = 0.4f)))
+            Text(title, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text(
+            "$pct%",
+            style = monoValue(16),
+            color = if (pct > 0) color else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        )
+        Text(
+            "$steps steps",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+        )
     }
 }
 
@@ -641,7 +817,7 @@ private fun ScaleCard(session: Session, estimatedCm: Double?, onRecalculated: ()
 
     LabCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SectionLabel("Scale for this clip")
+            SectionLabel("Scale for this clip", icon = LabIcons.ScaleTune)
             if (estimatedCm != null) {
                 val estimate = estimatedCm.roundToInt()
                 Text("From the belt speed you look about $estimate cm tall.", style = MaterialTheme.typography.titleMedium)
@@ -745,36 +921,86 @@ private fun FeedbackCard(item: Feedback, badge: Badge?) {
         FeedbackStatus.INFO -> "Note" to signalColour(null)
     }
     LabCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(
+                    Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(tint.copy(alpha = 0.12f))
+                        .border(1.dp, tint.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(LabIcons.forTopic(item.topic), contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
+                }
                 Column(Modifier.weight(1f)) {
                     Text(item.topic, style = MaterialTheme.typography.titleMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        SectionLabel(statusText, colour = tint)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        StatusDot(item.status == FeedbackStatus.GOOD)
+                        Text(statusText.uppercase(), style = MaterialTheme.typography.labelSmall, color = tint)
                         badge?.let { BadgePill(it) }
                     }
                 }
-                // Long values ("14° at landing, 38° max") are set smaller and wrap, so they don't squeeze the title.
                 CountUpText(
                     item.value,
                     style = monoValue(if (item.value.length <= 8) 18 else 14),
                     colour = tint,
                     textAlign = TextAlign.End,
-                    modifier = Modifier.widthIn(max = 190.dp),
+                    modifier = Modifier.widthIn(max = 160.dp),
                 )
             }
-            Text(item.message, style = MaterialTheme.typography.bodyMedium)
-            item.cue?.let { Text("Cue: \"$it\"", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold) }
-            item.drill?.let { Text("Drill: $it", style = MaterialTheme.typography.bodyMedium) }
             item.scale?.let { RangeBar(it, markerColor = tint, goodColor = good) }
+            Text(item.message, style = MaterialTheme.typography.bodyMedium)
+            item.cue?.let { cue ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f))
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(LabIcons.CoachingCue, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                    Column {
+                        Text("COACHING CUE", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        Text("\"$cue\"", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+            item.drill?.let { drill ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(LabIcons.Drill, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                    Column {
+                        Text("PRACTICE DRILL", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(drill, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
             item.metronomeSpm?.let { spm ->
                 val context = LocalContext.current
                 var set by remember { mutableStateOf(false) }
-                TextButton(onClick = {
-                    CoachSettings(context).metronomeSpm = spm
-                    set = true
-                }, enabled = !set) {
-                    Text(if (set) "Metronome set to $spm: find it on the camera and run screens" else "Set the metronome to $spm")
+                OutlinedButton(
+                    onClick = {
+                        CoachSettings(context).metronomeSpm = spm
+                        set = true
+                    },
+                    enabled = !set,
+                    modifier = Modifier.padding(top = 2.dp),
+                ) {
+                    Icon(LabIcons.Cadence, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (set) "Metronome set to $spm spm" else "Set metronome to $spm spm")
                 }
             }
         }

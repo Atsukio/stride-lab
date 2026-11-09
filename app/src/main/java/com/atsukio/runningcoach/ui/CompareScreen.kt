@@ -21,6 +21,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.width
+import com.atsukio.runningcoach.analysis.FootStrikeType
+import kotlin.math.abs
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
@@ -338,15 +342,39 @@ private fun SyncedPlayers(first: ClipData, second: ClipData) {
 @Composable
 private fun ComparedVideo(title: String, clip: ClipData, player: ExoPlayer, frame: Int, showSkeleton: Boolean, modifier: Modifier) {
     val aspect = clip.session.videoWidth.toFloat() / clip.session.videoHeight.coerceAtLeast(1)
+    val activeContact = clip.contacts.minByOrNull { abs(it - frame) }
+    val isAtContact = activeContact != null && abs(activeContact - frame) <= (clip.session.playbackFps * 0.18f).roundToInt().coerceAtLeast(2)
+    val activeStrike = if (isAtContact && activeContact != null) {
+        val contactIdx = clip.contacts.indexOf(activeContact)
+        clip.session.metrics?.footStrikes?.getOrNull(contactIdx)
+    } else null
+
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             SectionLabel(title)
-            clip.session.metrics?.footStrikeSummary?.let { summary ->
-                Text(
-                    " · $summary",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            if (activeStrike != null) {
+                val (name, col) = when (activeStrike) {
+                    FootStrikeType.HEEL -> "Heel" to Signal.Info
+                    FootStrikeType.MIDFOOT -> "Midfoot" to Signal.Good
+                    FootStrikeType.FOREFOOT -> "Forefoot" to Signal.Improve
+                }
+                Spacer(Modifier.width(6.dp))
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(col.copy(alpha = 0.2f))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                    Text(name, style = MaterialTheme.typography.labelSmall, color = col, fontWeight = FontWeight.SemiBold)
+                }
+            } else {
+                clip.session.metrics?.footStrikeSummary?.let { summary ->
+                    Text(
+                        " · $summary",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
         Box(Modifier.fillMaxWidth().background(Color.Black), contentAlignment = Alignment.Center) {
@@ -427,7 +455,7 @@ private fun FootStrikeComparisonCard(a: com.atsukio.runningcoach.analysis.GaitMe
 
     LabCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            SectionLabel("Foot strike comparison")
+            SectionLabel("Foot strike comparison", icon = LabIcons.FootStrike)
             Text(callout, style = MaterialTheme.typography.bodyMedium)
 
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {

@@ -42,12 +42,28 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
-/** A small tag above a section, in monospace capitals: "MAIN FOCUS", "AT LANDING". */
+/** A small tag above a section, in monospace capitals: "MAIN FOCUS", "AT LANDING", optionally with a lab icon. */
 @Composable
-fun SectionLabel(text: String, modifier: Modifier = Modifier, colour: Color = MaterialTheme.colorScheme.primary) {
-    Text(text.uppercase(), modifier, style = MaterialTheme.typography.labelSmall, color = colour)
+fun SectionLabel(
+    text: String,
+    modifier: Modifier = Modifier,
+    colour: Color = MaterialTheme.colorScheme.primary,
+    icon: ImageVector? = null,
+) {
+    Row(
+        modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        if (icon != null) {
+            Icon(icon, contentDescription = null, tint = colour, modifier = Modifier.size(13.dp))
+        }
+        Text(text.uppercase(), style = MaterialTheme.typography.labelSmall, color = colour)
+    }
 }
 
 /** A status dot: green in range, amber to work on, blue for a note. */
