@@ -35,7 +35,11 @@ data class LandingAnnotation(
      * An idealized target landing based on the runner's own leg length and hip position:
      * foot placed under the body (good coaching range) with a softly flexed knee and vertical shin.
      */
-    fun ideal(targetOverstrideCm: Double = 3.0, legCm: Double? = null): LandingAnnotation {
+    fun ideal(
+        targetOverstrideCm: Double = 3.0,
+        legCm: Double? = null,
+        targetStrike: FootStrikeType = FootStrikeType.MIDFOOT,
+    ): LandingAnnotation {
         val h = Vec2(hip.x.toDouble(), hip.y.toDouble())
         val a = Vec2(ankle.x.toDouble(), ankle.y.toDouble())
         val k = Vec2(knee.x.toDouble(), knee.y.toDouble())
@@ -72,19 +76,32 @@ data class LandingAnnotation(
         val targetShin = Math.toDegrees(atan2((targetAnkle.x - targetKnee.x) * facing, targetAnkle.y - targetKnee.y))
         val targetKneeFlex = 180.0 - angleAt(targetKnee, h, targetAnkle)
 
+        val heelY = targetAnkle.y + when (targetStrike) {
+            FootStrikeType.HEEL -> 0.009
+            FootStrikeType.FOREFOOT -> -0.004
+            FootStrikeType.MIDFOOT -> 0.005
+        }
+        val toeY = targetAnkle.y + when (targetStrike) {
+            FootStrikeType.HEEL -> 0.001
+            FootStrikeType.FOREFOOT -> 0.010
+            FootStrikeType.MIDFOOT -> 0.005
+        }
+        val heelX = targetAnkle.x - facing * 0.015
+        val toeX = targetAnkle.x + facing * 0.035
+
         return LandingAnnotation(
             shoulder = shoulder,
             hip = hip,
             knee = Point(targetKnee.x.toFloat(), targetKnee.y.toFloat()),
             ankle = Point(targetAnkle.x.toFloat(), targetAnkle.y.toFloat()),
-            heel = Point(targetAnkle.x.toFloat() - (facing * 0.015f).toFloat(), targetAnkle.y.toFloat() + 0.005f),
-            toe = Point(targetAnkle.x.toFloat() + (facing * 0.035f).toFloat(), targetAnkle.y.toFloat() + 0.005f),
+            heel = Point(heelX.toFloat(), heelY.toFloat()),
+            toe = Point(toeX.toFloat(), toeY.toFloat()),
             overstrideCm = actualTargetCm,
             shinDeg = targetShin,
             kneeFlexionDeg = targetKneeFlex,
             leanDeg = leanDeg,
             facing = facing,
-            strike = FootStrikeType.MIDFOOT,
+            strike = targetStrike,
         )
     }
 

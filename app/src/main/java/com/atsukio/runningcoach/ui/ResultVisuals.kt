@@ -17,9 +17,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -144,8 +146,11 @@ fun LandingCard(
     val legCm = remember(metrics) {
         metrics.overstrideCm?.let { cm -> metrics.overstrideLegRatio?.takeIf { abs(it) > 1e-6 }?.let { cm / it } }
     }
-    val idealAnnotation = remember(annotation, legCm) { annotation?.ideal(legCm = legCm) }
     var mode by rememberSaveable { mutableStateOf(LandingVisualMode.TRACKED) }
+    var targetStrike by rememberSaveable { mutableStateOf(FootStrikeType.MIDFOOT) }
+    val idealAnnotation = remember(annotation, legCm, targetStrike) {
+        annotation?.ideal(legCm = legCm, targetStrike = targetStrike)
+    }
     var image by remember { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(frame) {
         image = null
@@ -163,6 +168,34 @@ fun LandingCard(
                             selected = mode == m,
                             onClick = { mode = m },
                             label = { Text(m.label, style = MaterialTheme.typography.labelSmall) },
+                        )
+                    }
+                }
+            }
+            if (mode != LandingVisualMode.TRACKED) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                        .border(1.dp, TargetMintColor.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(LabIcons.FootStrike, contentDescription = null, tint = TargetMintColor, modifier = Modifier.size(16.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("TARGET STRIKE OVERLAY", style = MaterialTheme.typography.labelSmall, color = TargetMintColor)
+                        Text(
+                            if (targetStrike == FootStrikeType.MIDFOOT) "Projected midfoot landing under hips" else "Projected forefoot landing under hips",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    listOf(FootStrikeType.MIDFOOT to "Midfoot", FootStrikeType.FOREFOOT to "Forefoot").forEach { (type, label) ->
+                        FilterChip(
+                            selected = targetStrike == type,
+                            onClick = { targetStrike = type },
+                            label = { Text(label, style = MaterialTheme.typography.labelSmall) },
                         )
                     }
                 }
@@ -198,9 +231,9 @@ fun LandingCard(
             val showing = if (mode == LandingVisualMode.TARGET) idealAnnotation else annotation
             showing?.let { a ->
                 if (mode == LandingVisualMode.TARGET) {
-                    Legend(TargetMintColor, "Target landing: foot landing close under hips")
+                    Legend(TargetMintColor, "Target: ${targetStrike.name.lowercase()} landing close under hips")
                 } else if (mode == LandingVisualMode.OVERLAY) {
-                    Legend(TargetMintColor, "Dashed mint: target landing under body")
+                    Legend(TargetMintColor, "Dashed mint: target ${targetStrike.name.lowercase()} landing under hips")
                 }
                 a.overstrideCm?.let {
                     Legend(
@@ -221,6 +254,13 @@ fun LandingCard(
                         FootStrikeType.FOREFOOT -> "Forefoot strike" to Signal.Improve
                     }
                     Legend(col, "Landing strike: $label")
+                }
+                if (annotation?.strike == FootStrikeType.HEEL && (mode == LandingVisualMode.TARGET || mode == LandingVisualMode.OVERLAY)) {
+                    Text(
+                        "Shifting from heel to midfoot landing absorbs shock naturally through your arch and knee.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 metrics.footStrikeSummary?.let { summary ->
                     Row(
@@ -292,7 +332,7 @@ private fun LandingOverlay(
     }
 }
 
-/** Draws the target proper form leg as a dashed mint ghost. */
+/** Draws the target proper form leg as a dashed mint ghost with target foot strike. */
 internal fun DrawScope.drawLandingGhost(ideal: LandingAnnotation, origin: Offset, frameSize: Size) {
     fun p(point: com.atsukio.runningcoach.analysis.Point) =
         Offset(origin.x + point.x * frameSize.width, origin.y + point.y * frameSize.height)
@@ -300,11 +340,29 @@ internal fun DrawScope.drawLandingGhost(ideal: LandingAnnotation, origin: Offset
     val knee = p(ideal.knee)
     val ankle = p(ideal.ankle)
     val thick = 4.dp.toPx()
+    val thin = 2.dp.toPx()
     val dashes = PathEffect.dashPathEffect(floatArrayOf(10.dp.toPx(), 7.dp.toPx()))
 
     drawLine(TargetMintColor, hip, knee, thick, StrokeCap.Round, pathEffect = dashes)
     drawLine(TargetMintColor, knee, ankle, thick, StrokeCap.Round, pathEffect = dashes)
-    drawCircle(TargetMintColor, radius = 6.dp.toPx(), center = ankle)
+
+    if (ideal.heel != null && ideal.toe != null) {
+        val h = p(ideal.heel)
+        val t = p(ideal.toe)
+        drawLine(TargetMintColor.copy(alpha = 0.8f), ankle, h, thin, StrokeCap.Round, pathEffect = dashes)
+        drawLine(TargetMintColor, h, t, thick, StrokeCap.Round, pathEffect = dashes)
+
+        val strikeSpot = when (ideal.strike) {
+            FootStrikeType.HEEL -> h
+            FootStrikeType.FOREFOOT -> t
+            FootStrikeType.MIDFOOT, null -> Offset((h.x + t.x) / 2f, (h.y + t.y) / 2f)
+        }
+        drawCircle(TargetMintColor.copy(alpha = 0.35f), radius = 10.dp.toPx(), center = strikeSpot)
+        drawCircle(TargetMintColor, radius = 5.dp.toPx(), center = strikeSpot)
+        drawCircle(Color.White, radius = 2.dp.toPx(), center = strikeSpot)
+    } else {
+        drawCircle(TargetMintColor, radius = 6.dp.toPx(), center = ankle)
+    }
 }
 
 /**

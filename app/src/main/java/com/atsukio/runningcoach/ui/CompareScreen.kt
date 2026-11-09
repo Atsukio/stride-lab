@@ -295,10 +295,24 @@ private fun SyncedPlayers(first: ClipData, second: ClipData) {
         }
     }
 
+    val frameA = frameAt(positionA, fpsA)
+    val frameB = frameAt(positionB, fpsB)
+    val contactA = contactsA.minByOrNull { abs(it - frameA) }
+    val isContactA = contactA != null && abs(contactA - frameA) <= (fpsA * 0.18f).roundToInt().coerceAtLeast(2)
+    val activeStrikeA = if (isContactA && contactA != null) {
+        first.session.metrics?.footStrikes?.getOrNull(contactsA.indexOf(contactA))
+    } else null
+
+    val contactB = contactsB.minByOrNull { abs(it - frameB) }
+    val isContactB = contactB != null && abs(contactB - frameB) <= (fpsB * 0.18f).roundToInt().coerceAtLeast(2)
+    val activeStrikeB = if (isContactB && contactB != null) {
+        second.session.metrics?.footStrikes?.getOrNull(contactsB.indexOf(contactB))
+    } else null
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ComparedVideo("This clip", first, playerA, frameAt(positionA, fpsA), showSkeleton, Modifier.weight(1f))
-            ComparedVideo("Other clip", second, playerB, frameAt(positionB, fpsB), showSkeleton, Modifier.weight(1f))
+            ComparedVideo("This clip", first, playerA, frameA, showSkeleton, Modifier.weight(1f))
+            ComparedVideo("Other clip", second, playerB, frameB, showSkeleton, Modifier.weight(1f))
         }
         val bothPoses = first.pose != null && second.pose != null
         if (bothPoses && GhostAligner.facing(first.pose!!) * GhostAligner.facing(second.pose!!) < 0) {
@@ -309,6 +323,35 @@ private fun SyncedPlayers(first: ClipData, second: ClipData) {
             )
         }
         val fraction = if (endA > startA) ((positionA - startA).toFloat() / (endA - startA)).coerceIn(0f, 1f) else 0f
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                StatusDot(activeStrikeA == FootStrikeType.MIDFOOT)
+                Text(
+                    "This: ${activeStrikeA?.let(::strikeName) ?: "Flight"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = activeStrikeA?.let(::strikeColor) ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = if (activeStrikeA != null) FontWeight.SemiBold else FontWeight.Normal,
+                )
+            }
+            Text(
+                "Stride ${(fraction * 100).roundToInt()}%",
+                style = monoValue(12),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "Other: ${activeStrikeB?.let(::strikeName) ?: "Flight"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = activeStrikeB?.let(::strikeColor) ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = if (activeStrikeB != null) FontWeight.SemiBold else FontWeight.Normal,
+                )
+                StatusDot(activeStrikeB == FootStrikeType.MIDFOOT)
+            }
+        }
         Slider(
             value = fraction,
             onValueChange = { f ->
@@ -524,4 +567,16 @@ private fun StrikeRatioBar(m: com.atsukio.runningcoach.analysis.GaitMetrics) {
             drawRect(Signal.Improve, Offset(startX, 0f), Size(segmentW, h))
         }
     }
+}
+
+private fun strikeName(type: FootStrikeType): String = when (type) {
+    FootStrikeType.HEEL -> "Heel strike"
+    FootStrikeType.MIDFOOT -> "Midfoot"
+    FootStrikeType.FOREFOOT -> "Forefoot"
+}
+
+private fun strikeColor(type: FootStrikeType): Color = when (type) {
+    FootStrikeType.HEEL -> Signal.Info
+    FootStrikeType.MIDFOOT -> Signal.Good
+    FootStrikeType.FOREFOOT -> Signal.Improve
 }
