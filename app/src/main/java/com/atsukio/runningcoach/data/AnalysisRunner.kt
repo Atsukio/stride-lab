@@ -75,6 +75,14 @@ class AnalysisRunner private constructor(private val app: Application) {
         dismiss(sessionId)
     }
 
+    /**
+     * Forgets a task that has finished, before the clip is analysed again. One left behind (its result was
+     * opened from the notification or the history list) would make [start] hand back the old result at once.
+     */
+    fun forgetFinished(sessionId: String) {
+        if (_tasks.value[sessionId]?.state?.value?.inProgress == false) dismiss(sessionId)
+    }
+
     /** Forgets a finished or failed task once the person has seen it. */
     fun dismiss(sessionId: String) {
         _tasks.update { it - sessionId }

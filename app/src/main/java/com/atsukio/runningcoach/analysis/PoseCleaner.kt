@@ -124,13 +124,31 @@ object PoseCleaner {
  */
 internal fun removeSpikes(x: DoubleArray, y: DoubleArray, half: Int, minPx: Double) {
     val spikes = BooleanArray(x.size)
+    // Scratch buffers, reused: this runs for every landmark on every frame, and building lists for each
+    // window made millions of short-lived objects on a long clip.
+    val wx = DoubleArray(2 * half + 1)
+    val wy = DoubleArray(2 * half + 1)
+    val sorted = DoubleArray(2 * half + 1)
+    fun median(values: DoubleArray, n: Int): Double {
+        values.copyInto(sorted, 0, 0, n)
+        java.util.Arrays.sort(sorted, 0, n)
+        return (sorted[(n - 1) / 2] + sorted[n / 2]) / 2
+    }
     for (i in x.indices) {
         if (x[i].isNaN()) continue
-        val window = (max(0, i - half)..minOf(x.lastIndex, i + half)).filter { !x[it].isNaN() }
-        if (window.size < 3) continue
-        val centre = Vec2(window.map { x[it] }.median()!!, window.map { y[it] }.median()!!)
-        val scatter = window.map { (Vec2(x[it], y[it]) - centre).length }.median()!!
-        val deviation = (Vec2(x[i], y[i]) - centre).length
+        var n = 0
+        for (j in max(0, i - half)..minOf(x.lastIndex, i + half)) {
+            if (x[j].isNaN() || y[j].isNaN()) continue
+            wx[n] = x[j]
+            wy[n] = y[j]
+            n++
+        }
+        if (n < 3) continue
+        val cx = median(wx, n)
+        val cy = median(wy, n)
+        for (k in 0 until n) wx[k] = kotlin.math.hypot(wx[k] - cx, wy[k] - cy)
+        val scatter = median(wx, n)
+        val deviation = kotlin.math.hypot(x[i] - cx, y[i] - cy)
         if (deviation > max(minPx, 4 * 1.4826 * scatter)) spikes[i] = true
     }
     for (i in x.indices) if (spikes[i]) {

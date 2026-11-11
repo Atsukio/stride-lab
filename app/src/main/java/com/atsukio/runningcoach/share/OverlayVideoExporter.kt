@@ -53,6 +53,9 @@ internal object OverlayVideoExporter {
                 val canvasBitmap = if (frame.bitmap.isMutable) frame.bitmap else frame.bitmap.copy(Bitmap.Config.ARGB_8888, true)
                 paint(canvasBitmap, frame.index, track, metrics.contactFrames, annotations, hold, landingWindow)
                 active.add(canvasBitmap, frame.timestampUs - firstTimestamp)
+                // Two full frames per video frame: freed now rather than left for the garbage collector.
+                if (canvasBitmap !== frame.bitmap) canvasBitmap.recycle()
+                frame.bitmap.recycle()
                 written++
                 onProgress((frame.index + 1f) / total)
             }

@@ -37,7 +37,20 @@ class SessionRepository(context: Context) {
         root.listFiles().orEmpty().mapNotNull { get(it.name) }.sortedByDescending { it.createdAt }
 
     fun save(session: Session) {
-        File(dir(session.id), SESSION_FILE).writeText(json.encodeToString(session))
+        writeSafely(File(dir(session.id), SESSION_FILE)) { it.writeText(json.encodeToString(session)) }
+    }
+
+    /**
+     * Writes to a temporary file and renames it over [target], so a crash or a full disk part-way through
+     * leaves the old file whole instead of a truncated one that can't be read.
+     */
+    private fun writeSafely(target: File, write: (File) -> Unit) {
+        val temp = File(target.parentFile, target.name + ".tmp")
+        write(temp)
+        if (!temp.renameTo(target)) {
+            temp.copyTo(target, overwrite = true)
+            temp.delete()
+        }
     }
 
     fun delete(id: String) {
@@ -87,7 +100,7 @@ class SessionRepository(context: Context) {
     fun hasPose(id: String): Boolean = File(File(root, id), POSE_FILE).exists()
 
     fun saveCaptureInfo(id: String, info: CaptureInfo) {
-        File(dir(id), CAPTURE_FILE).writeText(json.encodeToString(info))
+        writeSafely(File(dir(id), CAPTURE_FILE)) { it.writeText(json.encodeToString(info)) }
     }
 
     fun loadCaptureInfo(id: String): CaptureInfo {
@@ -121,8 +134,8 @@ class SessionRepository(context: Context) {
         File(runsRoot, "$id.json").delete()
     }
 
-    fun savePose(id: String, track: PoseTrack) {
-        DataOutputStream(File(dir(id), POSE_FILE).outputStream().buffered()).use { out ->
+    fun savePose(id: String, track: PoseTrack) = writeSafely(File(dir(id), POSE_FILE)) { file ->
+        DataOutputStream(file.outputStream().buffered()).use { out ->
             out.writeInt(POSE_FORMAT)
             out.writeFloat(track.fps)
             out.writeInt(track.width)
@@ -143,12 +156,19 @@ class SessionRepository(context: Context) {
     fun loadPose(id: String): PoseTrack? {
         val file = File(File(root, id), POSE_FILE)
         if (!file.exists()) return null
-        return DataInputStream(file.inputStream().buffered()).use { input ->
+        // A file cut short (by an older version that wrote in place) reads as "no poses", not a crash.
+        return runCatching { readPose(file) }.getOrNull()
+    }
+
+    private fun readPose(file: File): PoseTrack? =
+        DataInputStream(file.inputStream().buffered()).use { input ->
             if (input.readInt() != POSE_FORMAT) return null
             val fps = input.readFloat()
             val width = input.readInt()
             val height = input.readInt()
-            val frames = List(input.readInt()) {
+            val count = input.readInt()
+            if (count !in 0..MAX_POSE_FRAMES) return null
+            val frames = List(count) {
                 if (!input.readBoolean()) return@List null
                 val x = FloatArray(Landmark.COUNT)
                 val y = FloatArray(Landmark.COUNT)
@@ -162,7 +182,6 @@ class SessionRepository(context: Context) {
             }
             PoseTrack(fps, width, height, frames)
         }
-    }
 
     private fun dir(id: String) = File(root, id).apply { mkdirs() }
 
@@ -170,6 +189,9 @@ class SessionRepository(context: Context) {
         const val SESSION_FILE = "session.json"
         const val CAPTURE_FILE = "capture.json"
         const val POSE_FILE = "pose.bin"
+
+        /** Far more than any clip holds (30 s at 240 fps is 7,200), to refuse a corrupt header. */
+        const val MAX_POSE_FRAMES = 100_000
         const val POSE_FORMAT = 1
     }
 }

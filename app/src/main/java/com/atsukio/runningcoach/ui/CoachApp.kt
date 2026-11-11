@@ -10,6 +10,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.atsukio.runningcoach.OpenRequests
+import com.atsukio.runningcoach.data.AnalysisRunner
 import com.atsukio.runningcoach.data.CoachSettings
 import com.atsukio.runningcoach.data.RunRecorder
 
@@ -122,7 +123,10 @@ fun CoachApp() {
             ResultScreen(
                 id = id,
                 onBack = { nav.popBackStack() },
-                onReanalyse = { nav.navigate("analyse/$id?reanalyse=true") },
+                onReanalyse = {
+                    AnalysisRunner.get(context).forgetFinished(id)
+                    nav.navigate("analyse/$id?reanalyse=true")
+                },
                 onCompare = { nav.navigate("compare/$id") },
             )
         }
