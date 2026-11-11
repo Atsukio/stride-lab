@@ -1,7 +1,20 @@
 # Stride Lab
 
+[![Build](https://github.com/Atsukio/stride-lab/actions/workflows/build.yml/badge.svg)](https://github.com/Atsukio/stride-lab/actions/workflows/build.yml)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-green.svg)](LICENSE)
+![Android 9+](https://img.shields.io/badge/Android-9%2B%20(API%2028)-3DDC84?logo=android&logoColor=white)
+![Kotlin](https://img.shields.io/badge/Kotlin-2.2-7F52FF?logo=kotlin&logoColor=white)
+![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?logo=jetpackcompose&logoColor=white)
+![MediaPipe](https://img.shields.io/badge/pose-MediaPipe-0097A7)
+[![Network: none](https://img.shields.io/badge/network-none%20(on--device%20only)-2ea44f)](PRIVACY.md)
+
 An Android app that watches a runner on a treadmill, measures their running form, and suggests improvements.
 Everything runs on the phone: there is no internet permission, no cloud service, and no backup of videos.
+
+<!-- markdownlint-disable-next-line MD033 -->
+<img src="docs/demo.gif" width="320" alt="The app's results screen: a clip replays at half speed with the detected skeleton and a ring at each foot landing, then the At landing card shows the foot 10 cm ahead of the hips, the shin angle and knee bend, and switches to the target and overlay views.">
+
+*The real app, screen-recorded on the emulator. The clip is a synthetic stick runner, not real footage.*
 
 ## How it works
 
@@ -113,7 +126,7 @@ The app itself never connects to the internet.
 
 ## Project layout
 
-```
+```text
 app/src/main/java/com/atsukio/runningcoach/
   analysis/   Pure Kotlin: pose track, gait metrics, coaching rules (unit-tested)
   pose/       MediaPipe frame-by-frame pose extraction

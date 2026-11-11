@@ -47,6 +47,13 @@ machine points at JDK 17. App code targets Java 17. compileSdk and targetSdk are
   runs them on every attached device, including the user's Pixel, which holds their real clips. The tests are written
   not to touch real data (old-dated fixtures, the crash log is restored), but still never run them on the Pixel
   without being asked. Fixtures live in `Fixtures.kt`; add a test there when you add a screen or a share path.
+- **README GIF** (`docs/demo.gif`): the real app screen-recorded on the **emulator only**, never from the user's
+  footage (they don't want their clips public). `DemoSeeder` (androidTest) saves two synthetic clips; it skips
+  itself unless run by hand: install both debug APKs on the emulator with `adb install -r`, then
+  `am instrument -w -e demo true -e class com.atsukio.runningcoach.DemoSeeder com.atsukio.runningcoach.test/androidx.test.runner.AndroidJUnitRunner`.
+  Record with `adb shell screenrecord`, scrolling with a slow `input swipe ... 1500` (a fast swipe flings to a
+  different place each time), and convert with ffmpeg (crop the status and nav bars, 360 px wide, 12 fps,
+  `palettegen`/`paletteuse`), keeping it under about 2 MB.
 - Use the Gradle quiet flag `-q` to keep output short. Stop the daemon when you're done (`./gradlew --stop`).
 
 ## Devices
@@ -68,7 +75,7 @@ machine points at JDK 17. App code targets Java 17. compileSdk and targetSdk are
 
 ## Code map
 
-```
+```text
 app/src/main/java/com/atsukio/runningcoach/
   analysis/  Pure Kotlin, no Android imports. PoseTrack, PoseCleaner (leg swaps, jumps, smoothing), LiveStrikeDetector
              (the landing pulse on the camera preview),
