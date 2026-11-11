@@ -159,17 +159,15 @@ fun LandingCard(
 
     LabCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                SectionLabel("At landing", icon = LabIcons.Landing)
-                Spacer(Modifier.weight(1f))
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    LandingVisualMode.entries.forEach { m ->
-                        FilterChip(
-                            selected = mode == m,
-                            onClick = { mode = m },
-                            label = { Text(m.label, style = MaterialTheme.typography.labelSmall) },
-                        )
-                    }
+            // The label sits above the chips: on one row, a phone-width card squeezed "Overlay" onto two lines.
+            SectionLabel("At landing", icon = LabIcons.Landing)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LandingVisualMode.entries.forEach { m ->
+                    FilterChip(
+                        selected = mode == m,
+                        onClick = { mode = m },
+                        label = { Text(m.label, style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                    )
                 }
             }
             if (mode != LandingVisualMode.TRACKED) {

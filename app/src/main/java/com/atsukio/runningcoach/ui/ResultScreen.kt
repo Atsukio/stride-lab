@@ -32,6 +32,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -592,9 +593,11 @@ private fun Summary(session: Session, feedback: List<Feedback>, plan: FocusPlan?
                 SectionLabel("All clear", colour = signalColour(true), icon = Icons.Default.Check)
                 Text("Nice running: nothing major to fix", style = MaterialTheme.typography.headlineSmall)
             }
-            Row(
+            // Wraps so the fourth chip keeps its figure and unit on one line on a phone-width card.
+            FlowRow(
                 Modifier.padding(top = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 session.metrics?.let { StatChip("${it.stepCount}", "steps", countUp = true) }
                 session.speedKmh?.let { StatChip(formatSpeed(it), if (session.speedFromSensor) "km/h watch" else "km/h") }
@@ -1085,12 +1088,14 @@ private fun VideoReplay(
             Spacer(Modifier.weight(1f))
             Switch(checked = showSkeleton, onCheckedChange = { showSkeleton = it })
         }
-        Row(
+        val frame = frameAt(positionMs, playbackFps)
+        // Wraps rather than squeezing: with both Raw and Last time showing, one row is too narrow on a phone,
+        // and the frame label below used to be crushed to one letter per line.
+        FlowRow(
             Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
         ) {
-            val frame = frameAt(positionMs, playbackFps)
             fun step(by: Int) {
                 playing = false
                 player.playWhenReady = false
@@ -1106,13 +1111,13 @@ private fun VideoReplay(
                 // The previous clip's skeleton in the same step of the stride, so differences in form show up.
                 FilterChip(selected = showGhost, onClick = { showGhost = !showGhost }, label = { Text("Last time") })
             }
-            Spacer(Modifier.weight(1f))
-            Text(
-                "Frame $frame · %.2f s".format(positionMs / 1000.0),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
+        Text(
+            "Frame $frame · %.2f s".format(positionMs / 1000.0),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.align(Alignment.End),
+        )
     }
 }
 
