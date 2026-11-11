@@ -67,6 +67,11 @@ private val PROGRESS_METRICS = listOf(
     ProgressMetric("Lean", "°", setOf("Posture")) { it.trunkLeanDeg },
     ProgressMetric("Elbow angle", "°", setOf("Arms")) { it.elbowAngleDeg },
     ProgressMetric("Heel strike", "%", setOf("Foot strike")) { it.heelStrikeRatio?.let { r -> r * 100 } },
+    // From front and rear clips only, so these chart on their own.
+    ProgressMetric("Hip drop", "°", setOf("Hip drop")) { it.frontal?.pelvicDropDeg },
+    ProgressMetric("Knee drift inwards", "°", setOf("Knee alignment")) { it.frontal?.kneeInwardDeg },
+    ProgressMetric("Step width", "cm", setOf("Step width")) { it.frontal?.stepWidthCm },
+    ProgressMetric("Trunk sway", "°", setOf("Trunk sway")) { it.frontal?.trunkSwayDeg },
 )
 
 /** One analysed clip on a trend: when, at what speed, and its value. */

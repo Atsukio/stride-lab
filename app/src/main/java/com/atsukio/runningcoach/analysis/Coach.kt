@@ -39,6 +39,11 @@ object Coach {
 
     fun review(metrics: GaitMetrics, speedKmh: Double?, previous: GaitMetrics? = null): List<Feedback> =
         listOfNotNull(
+            // Front and rear findings first, so that clip's main focus is something only that angle can show.
+            metrics.frontal?.let(::hipDrop)?.let { it.copy(scale = Scale(metrics.frontal.pelvicDropDeg!!, 0.0, 16.0, 0.0, 6.0, "°")) },
+            metrics.frontal?.let(::kneeAlignment)?.let { it.copy(scale = Scale(metrics.frontal.kneeInwardDeg!!, -10.0, 25.0, -10.0, 8.0, "°")) },
+            metrics.frontal?.stepWidthCm?.let { stepWidth(it).copy(scale = Scale(it, -8.0, 20.0, 3.0, 15.0, "cm")) },
+            metrics.frontal?.trunkSwayDeg?.let { trunkSway(it).copy(scale = Scale(it, 0.0, 12.0, 0.0, 5.0, "°")) },
             metrics.cadenceSpm?.let {
                 cadence(it, speedKmh, previous?.cadenceSpm)
                     .copy(scale = Scale(it, 130.0, 200.0, cadenceFloor(speedKmh), 200.0, "steps/min"))
@@ -302,6 +307,114 @@ object Coach {
             message = message,
             cue = cue,
         )
+    }
+
+    /** "L 4° · R 7°", or just the one that was measured. */
+    private fun leftRight(left: Double?, right: Double?): String = listOfNotNull(
+        left?.let { "L ${it.roundToInt()}°" },
+        right?.let { "R ${it.roundToInt()}°" },
+    ).joinToString(" · ")
+
+    private fun hipDrop(f: FrontalMetrics): Feedback? {
+        val deg = f.pelvicDropDeg ?: return null
+        val value = "${deg.roundToInt()}° (${leftRight(f.pelvicDropLeftDeg, f.pelvicDropRightDeg)})"
+        val left = f.pelvicDropLeftDeg
+        val right = f.pelvicDropRightDeg
+        // One leg reading higher can also be a phone that wasn't level, so it is only ever a note.
+        val uneven = if (left != null && right != null && abs(left - right) > 4) {
+            " It drops more when you stand on your ${if (left > right) "left" else "right"} leg. " +
+                "Check the phone was level before reading much into that."
+        } else {
+            ""
+        }
+        val cue = "Keep your belt line level."
+        val drill = "Hip hikes off a step, 2 × 12 each side, then side-lying leg raises, 2 × 15 each side."
+        return when {
+            deg <= 6 -> Feedback(
+                "Hip drop", value, FeedbackStatus.GOOD,
+                "Your hips stay close to level while you stand on each leg.$uneven",
+            )
+            deg <= 10 -> Feedback(
+                "Hip drop", value, FeedbackStatus.IMPROVE,
+                "The hip on your lifted leg's side dips a little each step, which is usually the standing hip tiring.$uneven",
+                cue = cue,
+                drill = drill,
+            )
+            else -> Feedback(
+                "Hip drop", value, FeedbackStatus.IMPROVE,
+                "The hip on your lifted leg's side dips clearly each step. Stronger hips help hold the pelvis level.$uneven",
+                cue = cue,
+                drill = drill,
+            )
+        }
+    }
+
+    private fun kneeAlignment(f: FrontalMetrics): Feedback? {
+        val deg = f.kneeInwardDeg ?: return null
+        val value = leftRight(f.kneeInwardLeftDeg, f.kneeInwardRightDeg)
+        val left = f.kneeInwardLeftDeg ?: Double.NEGATIVE_INFINITY
+        val right = f.kneeInwardRightDeg ?: Double.NEGATIVE_INFINITY
+        val which = when {
+            left > 8 && right > 8 -> "Both knees drift"
+            left > right -> "Your left knee drifts"
+            else -> "Your right knee drifts"
+        }
+        val cue = "Knee over the middle of your foot."
+        val drill = "Single-leg squats in front of a mirror, 2 × 8 each side, keeping the knee over your second toe."
+        return when {
+            deg <= 8 -> Feedback(
+                "Knee alignment", value, FeedbackStatus.GOOD,
+                "Your knees stay in line between hip and foot as you land.",
+            )
+            deg <= 14 -> Feedback(
+                "Knee alignment", value, FeedbackStatus.IMPROVE,
+                "$which inwards a little while that foot is on the ground.",
+                cue = cue,
+                drill = drill,
+            )
+            else -> Feedback(
+                "Knee alignment", value, FeedbackStatus.IMPROVE,
+                "$which clearly inwards while that foot is on the ground. Hip and thigh strength usually helps most.",
+                cue = cue,
+                drill = drill,
+            )
+        }
+    }
+
+    private fun stepWidth(cm: Double): Feedback {
+        val value = if (cm < 0) "${abs(cm).roundToInt()} cm crossed over" else "${cm.roundToInt()} cm apart"
+        return when {
+            cm < 0 -> Feedback(
+                "Step width", value, FeedbackStatus.IMPROVE,
+                "Your feet land across your centre line, each one in front of the other. That twists the leg a little on every step.",
+                cue = "Run either side of a line.",
+                drill = "4 × 30 seconds along a painted line or belt seam, landing one foot each side of it.",
+            )
+            cm < 3 -> Feedback(
+                "Step width", value, FeedbackStatus.INFO,
+                "Your feet land almost on one line. That's common; landing slightly wider is easier on the shins and hips.",
+                cue = "Run either side of a line.",
+            )
+            cm <= 15 -> Feedback("Step width", value, FeedbackStatus.GOOD, "Your feet land a comfortable distance apart.")
+            else -> Feedback(
+                "Step width", value, FeedbackStatus.INFO,
+                "Your feet land quite far apart, which sends some effort sideways. Check it isn't the treadmill belt feeling narrow.",
+            )
+        }
+    }
+
+    private fun trunkSway(deg: Double): Feedback {
+        val value = "${deg.roundToInt()}° each way"
+        return if (deg <= 5) {
+            Feedback("Trunk sway", value, FeedbackStatus.GOOD, "Your upper body stays steady over your hips.")
+        } else {
+            Feedback(
+                "Trunk sway", value, FeedbackStatus.IMPROVE,
+                "Your upper body rocks from side to side with each step, which costs energy and often goes with hip drop.",
+                cue = "Run tall, shoulders quiet.",
+                drill = "Side planks, 3 × 20 seconds each side.",
+            )
+        }
     }
 
     private fun since(previous: Double?, unit: String): String =

@@ -33,5 +33,9 @@ object MetricComparison {
         ComparedMetric("Left/right difference", "cm", first.overstrideAsymmetryCm, second.overstrideAsymmetryCm),
         ComparedMetric("Heel strike", "%", first.heelStrikeRatio?.let { it * 100 }, second.heelStrikeRatio?.let { it * 100 }),
         ComparedMetric("Midfoot strike", "%", first.midfootStrikeRatio?.let { it * 100 }, second.midfootStrikeRatio?.let { it * 100 }),
+        ComparedMetric("Hip drop", "°", first.frontal?.pelvicDropDeg, second.frontal?.pelvicDropDeg),
+        ComparedMetric("Knee drift inwards", "°", first.frontal?.kneeInwardDeg, second.frontal?.kneeInwardDeg),
+        ComparedMetric("Step width", "cm", first.frontal?.stepWidthCm, second.frontal?.stepWidthCm),
+        ComparedMetric("Trunk sway", "°", first.frontal?.trunkSwayDeg, second.frontal?.trunkSwayDeg),
     ).filter { it.first != null || it.second != null }
 }

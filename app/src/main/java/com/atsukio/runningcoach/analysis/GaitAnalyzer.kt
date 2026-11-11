@@ -15,6 +15,37 @@ enum class FootStrikeType {
     FOREFOOT,
 }
 
+/** Where the camera stood. Side-on clips and front or rear clips measure different things. */
+@Serializable
+enum class CameraView(val label: String) {
+    SIDE("Side view"),
+    REAR("Rear view"),
+    FRONT("Front view"),
+}
+
+/**
+ * What a front or rear clip measures. "Left" and "right" are the runner's own, as the pose detector labelled them.
+ * Angles are positive in the direction a coach would flag: the lifted side's hip dropping, the knee moving inwards.
+ */
+@Serializable
+data class FrontalMetrics(
+    /** Hip line tilt while standing on one leg, averaged over both legs so a tilted phone cancels out. */
+    val pelvicDropDeg: Double?,
+    /** Hip drop while standing on the left leg (the right hip drops). */
+    val pelvicDropLeftDeg: Double?,
+    val pelvicDropRightDeg: Double?,
+    /** How far the standing knee bends inwards from the hip-to-ankle line; the larger of the two legs. */
+    val kneeInwardDeg: Double?,
+    val kneeInwardLeftDeg: Double?,
+    val kneeInwardRightDeg: Double?,
+    /** Sideways distance between one foot's landing and the next; negative when the feet cross over. */
+    val stepWidthCm: Double?,
+    /** How far the trunk rocks to each side of its middle position. */
+    val trunkSwayDeg: Double?,
+    /** For each landing in [GaitMetrics.contactFrames], whether it was the left foot. */
+    val leftContacts: List<Boolean> = emptyList(),
+)
+
 /** Running-form measurements from one clip. Any metric that couldn't be measured is null. */
 @Serializable
 data class GaitMetrics(
@@ -49,6 +80,9 @@ data class GaitMetrics(
     val forefootStrikeRatio: Double? = null,
     /** Classified strike type for each contact in [contactFrames], aligned by index. */
     val footStrikes: List<FootStrikeType> = emptyList(),
+    val view: CameraView = CameraView.SIDE,
+    /** Set for front and rear clips, where the side-on figures above are null. */
+    val frontal: FrontalMetrics? = null,
 ) {
     /** Text summary of foot strike pattern, e.g. "75% Heel · 25% Midfoot". */
     val footStrikeSummary: String?
@@ -83,7 +117,7 @@ sealed interface GaitResult {
 }
 
 /**
- * Measures running form from a side-on pose track.
+ * Measures running form from a pose track: side-on here, and front or rear clips in [FrontalAnalyzer].
  *
  * Distances are worked out in pixels, then converted to centimetres. With a treadmill speed,
  * the scale comes from the belt: a planted foot moves backwards across the image at belt speed.
@@ -94,9 +128,9 @@ sealed interface GaitResult {
  */
 object GaitAnalyzer {
     /** Hip-joint-to-ankle length as a fraction of standing height. */
-    private const val LEG_TO_HEIGHT = 0.49
+    internal const val LEG_TO_HEIGHT = 0.49
 
-    private enum class Side(
+    internal enum class Side(
         val shoulder: Int, val elbow: Int, val wrist: Int,
         val hip: Int, val knee: Int, val ankle: Int, val heel: Int, val toe: Int,
     ) {
@@ -132,10 +166,8 @@ object GaitAnalyzer {
         }
 
         val spread = shoulderSpreadRatio(s)
-        if (spread != null && spread > 0.5) {
-            return GaitResult.Failure(
-                "This looks like a front or rear view. This version analyses side-on footage, so film from the runner's side.",
-            )
+        if (spread != null && spread > FRONTAL_SPREAD) {
+            return FrontalAnalyzer.analyze(track, s, legPx, spread, runnerHeightCm)
         }
         if (spread != null && spread > 0.3) {
             warnings += "The camera doesn't look fully side-on, so distances may be a little off."
@@ -304,6 +336,9 @@ object GaitAnalyzer {
         return GaitResult.Success(metrics, warnings)
     }
 
+    /** Shoulder width over torso length above which the clip is a front or rear view, not a side view. */
+    internal const val FRONTAL_SPREAD = 0.5
+
     /** Classifies a single landing as heel, midfoot or forefoot from the heel and toe heights at contact. */
     internal fun classifyStrike(heel: Vec2, toe: Vec2, legPx: Double): FootStrikeType? {
         if (!heel.isValid || !toe.isValid || legPx <= 1e-4) return null
@@ -433,7 +468,7 @@ object GaitAnalyzer {
     }
 
     /** Frames where a heel comes back down to the ground after being clearly in the air. */
-    private fun detectContacts(heelY: DoubleArray, legPx: Double): List<Int> {
+    internal fun detectContacts(heelY: DoubleArray, legPx: Double): List<Int> {
         val ground = heelY.toList().percentile(0.95) ?: return emptyList()
         val airLevel = ground - 0.12 * legPx
         val contactLevel = ground - 0.04 * legPx
@@ -453,7 +488,7 @@ object GaitAnalyzer {
     }
 
     /** Combines both feet's landings, dropping duplicates caused by swapped leg labels. */
-    private fun mergeContacts(all: List<Int>, minGapFrames: Int): List<Int> {
+    internal fun mergeContacts(all: List<Int>, minGapFrames: Int): List<Int> {
         val merged = mutableListOf<Int>()
         for (c in all.sorted()) {
             if (merged.isEmpty() || c - merged.last() >= minGapFrames) merged += c

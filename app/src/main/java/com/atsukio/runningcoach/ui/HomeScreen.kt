@@ -52,6 +52,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.atsukio.runningcoach.R
+import com.atsukio.runningcoach.analysis.CameraView
 import com.atsukio.runningcoach.analysis.Coach
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.atsukio.runningcoach.data.CoachSettings
@@ -239,7 +240,7 @@ fun FilmingTips(modifier: Modifier = Modifier, onOpenGuide: (() -> Unit)? = null
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("How to film", style = MaterialTheme.typography.titleMedium)
             Text("1. Run on a treadmill so you stay in one spot.")
-            Text("2. Put the phone side-on to the runner at hip height, about 2–3 m away.")
+            Text("2. Put the phone side-on to the runner (or straight behind) at hip height, about 2–3 m away.")
             Text("3. Keep the whole body, head to feet, in frame.")
             Text("4. Record 10–15 seconds of steady running.")
             Text("Tip: a Bluetooth camera remote can start and stop recording.")
@@ -314,6 +315,10 @@ private fun SessionCard(session: Session, onClick: () -> Unit) {
                     metrics.cadenceSpm?.let { StatChip("${it.roundToInt()}", "spm") }
                     session.speedKmh?.let { StatChip(formatSpeed(it), "km/h") }
                     metrics.overstrideCm?.let { StatChip("${it.roundToInt()}", "cm overstride") }
+                    metrics.frontal?.pelvicDropDeg?.let { StatChip("${it.roundToInt()}°", "hip drop") }
+                }
+                if (metrics.view != CameraView.SIDE) {
+                    Text(metrics.view.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }

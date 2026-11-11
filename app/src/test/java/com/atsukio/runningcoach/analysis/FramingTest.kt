@@ -34,7 +34,18 @@ class FramingTest {
     fun headCutOff() = assertTrue(Framing.check(pose(top = 0.005f), 120).message.contains("head"))
 
     @Test
-    fun facingTheCamera() = assertTrue(Framing.check(pose(shoulderSpread = 0.2f), 120).message.contains("side-on"))
+    fun squareOnIsAccepted() {
+        val advice = Framing.check(pose(shoulderSpread = 0.2f), 120)
+        assertTrue(advice.good)
+        assertTrue(advice.message.contains("rear"))
+    }
+
+    @Test
+    fun atAnAngle() {
+        val advice = Framing.check(pose(shoulderSpread = 0.15f), 120)
+        assertFalse(advice.good)
+        assertTrue(advice.message.contains("angle"))
+    }
 
     @Test
     fun tooSmall() = assertTrue(Framing.check(pose(top = 0.4f, bottom = 0.7f), 120).message.contains("closer"))

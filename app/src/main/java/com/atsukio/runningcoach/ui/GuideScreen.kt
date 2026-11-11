@@ -50,12 +50,12 @@ fun GuideScreen(onDone: () -> Unit) {
         ) {
             Text("Set up your camera", style = MaterialTheme.typography.headlineMedium)
             Text(
-                "Stride Lab measures your form from the side, so where the phone goes matters more than anything else.",
+                "Stride Lab measures your form from the side, and from behind if you film a second clip. Where the phone goes matters more than anything else.",
                 style = MaterialTheme.typography.bodyLarge,
             )
             SetupDiagram(Modifier.fillMaxWidth().height(262.dp))
             Text(
-                "✓ Beside the treadmill   ✗ Not in front of it or behind it",
+                "✓ Beside the treadmill, square to your side   ✗ Not at an angle",
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -69,6 +69,20 @@ fun GuideScreen(onDone: () -> Unit) {
             Step(3, "Whole body in frame", "Head to feet, with a little space around you. The camera screen tells you if anything's cut off.")
             Step(4, "Good light", "Bright light keeps the camera at 60 fps, which catches each foot landing.")
             Step(5, "Run steadily", "Get up to your normal pace first, then record 10–30 seconds.")
+            Text("A second angle: from behind", style = MaterialTheme.typography.titleLarge)
+            Text(
+                "A clip from straight behind shows what the side can't: hip drop, knees drifting inwards, feet crossing " +
+                    "over and trunk sway. The app works out which angle a clip was filmed from.",
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            RearDiagram(Modifier.fillMaxWidth().height(150.dp))
+            Step(1, "Straight behind, in line with the belt", "Centre the phone behind the treadmill and keep it level. At an angle, every sideways figure reads low.")
+            Step(2, "Same height and distance", "Hip height, 2–3 m back, whole body in frame.")
+            Step(
+                3,
+                "Behind is better than in front",
+                "From the front, the console and handrails usually hide your legs. A front clip is measured the same way if they don't.",
+            )
             Text(
                 "Everything stays on this phone. Nothing is uploaded.",
                 style = MaterialTheme.typography.bodySmall,
@@ -87,6 +101,51 @@ private fun Step(number: Int, title: String, detail: String) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(detail, style = MaterialTheme.typography.bodyMedium)
         }
+    }
+}
+
+/** The rear-view set-up seen from above: the phone centred behind the treadmill, looking along the belt. */
+@Composable
+private fun RearDiagram(modifier: Modifier) {
+    val ink = MaterialTheme.colorScheme.onSurface
+    val accent = MaterialTheme.colorScheme.primary
+    val belt = MaterialTheme.colorScheme.surfaceVariant
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val small = TextStyle(color = ink, fontSize = with(density) { 11.dp.toSp() })
+    Canvas(
+        modifier.semantics {
+            contentDescription = "Diagram seen from above: the phone stands 2 to 3 metres straight behind the treadmill, " +
+                "in line with the belt, aimed at the runner's back."
+        },
+    ) {
+        fun d(v: Float) = v.dp.toPx()
+        val cy = size.height * 0.5f
+        val tl = size.width * 0.42f
+        val tr = size.width * 0.94f
+        val half = d(34f)
+        drawRoundRect(ink, Offset(tl, cy - half), Size(tr - tl, half * 2), CornerRadius(d(8f)), style = Stroke(d(2.5f)))
+        drawRoundRect(belt, Offset(tl + d(8f), cy - half + d(8f)), Size(tr - tl - d(34f), half * 2 - d(16f)), CornerRadius(d(4f)))
+        drawRoundRect(ink, Offset(tr - d(20f), cy - half + d(4f)), Size(d(14f), half * 2 - d(8f)), CornerRadius(d(3f)), style = Stroke(d(2f)))
+        // The runner from above, facing the console (to the right): shoulders across the belt, head, nose.
+        val rx = tl + (tr - tl) * 0.45f
+        drawRoundRect(lerp(belt, ink, 0.55f), Offset(rx - d(6f), cy - d(17f)), Size(d(12f), d(34f)), CornerRadius(d(6f)))
+        drawOval(ink, Offset(rx - d(5f), cy - d(7f)), Size(d(14f), d(14f)))
+        drawPath(
+            Path().apply { moveTo(rx + d(19f), cy); lineTo(rx + d(9f), cy - d(5f)); lineTo(rx + d(9f), cy + d(5f)); close() },
+            ink,
+        )
+        drawLabel(measurer, "you", Offset(rx - d(8f), cy - half - d(18f)), small)
+        // The phone behind, on the belt's centre line, lens towards the runner's back.
+        val px = size.width * 0.10f
+        drawRoundRect(accent, Offset(px - d(3f), cy - d(13f)), Size(d(6f), d(26f)), CornerRadius(d(1.5f)))
+        drawCircle(accent, d(3f), Offset(px + d(4f), cy))
+        val cone = PathEffect.dashPathEffect(floatArrayOf(d(6f), d(4f)))
+        drawLine(accent, Offset(px + d(7f), cy), Offset(tl - d(2f), cy - half), d(2f), pathEffect = cone)
+        drawLine(accent, Offset(px + d(7f), cy), Offset(tl - d(2f), cy + half), d(2f), pathEffect = cone)
+        drawLine(accent, Offset(px + d(7f), cy), Offset(rx - d(10f), cy), d(1.5f), pathEffect = cone)
+        drawLabel(measurer, "phone, hip height", Offset(px - d(10f), cy + d(22f)), small.copy(color = accent))
+        drawLabel(measurer, "2–3 m, in line with the belt", Offset(px + d(22f), cy - half - d(18f)), small)
     }
 }
 

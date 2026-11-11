@@ -22,7 +22,7 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * Not a real test: saves two made-up clips (a stick runner drawn into an MP4, with its poses) so the README
+ * Not a real test: saves made-up clips (two side-on and one from behind) (a stick runner drawn into an MP4, with its poses) so the README
  * demo can be screen-recorded from the real app on the emulator, with no one's footage. It skips itself unless
  * run by hand on the emulator with `am instrument -e demo true -e class com.atsukio.runningcoach.DemoSeeder ...`.
  */
@@ -37,6 +37,69 @@ class DemoSeeder {
         val now = System.currentTimeMillis()
         seed(repo, "demo-earlier", now - 7 * day, DemoRunner(cadence = 162.0, landingAheadPx = 95.0, leanDeg = 3.0))
         seed(repo, "demo-latest", now, DemoRunner(cadence = 172.0, landingAheadPx = 50.0, leanDeg = 6.0))
+        seedRear(repo, "demo-rear", now + 60_000)
+    }
+
+    private fun seedRear(repo: SessionRepository, id: String, createdAt: Long) {
+        repo.delete(id)
+        val runner = DemoRearRunner()
+        val track = runner.track(SECONDS)
+        repo.savePose(id, track)
+        drawRearVideo(runner, repo.videoFile(id))
+        repo.saveCaptureInfo(id, CaptureInfo())
+        repo.save(
+            SessionBuilder.build(
+                id = id, createdAt = createdAt, track = track, playbackFps = FPS, heightCm = HEIGHT_CM,
+                capture = CaptureInfo(), extractionNotes = emptyList(), processingSec = null,
+                analysedLive = false, scaleEdited = false,
+            ),
+        )
+    }
+
+    private fun drawRearVideo(runner: DemoRearRunner, out: java.io.File) {
+        val scale = VIDEO_W / DemoRunner.WIDTH.toFloat()
+        val bitmap = Bitmap.createBitmap(VIDEO_W, VIDEO_H, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val wall = Paint().apply {
+            shader = LinearGradient(0f, 0f, 0f, VIDEO_H.toFloat(), Color.rgb(58, 62, 66), Color.rgb(34, 36, 39), Shader.TileMode.CLAMP)
+        }
+        val deck = Paint().apply { color = Color.rgb(22, 23, 25) }
+        val limb = limbPaint(Color.rgb(196, 202, 208), 30f * scale)
+        val trunk = limbPaint(Color.rgb(170, 176, 182), 34f * scale)
+        val shoe = limbPaint(Color.rgb(230, 120, 60), 26f * scale)
+        val label = Paint().apply { color = Color.argb(150, 255, 255, 255); textSize = 22f; isAntiAlias = true }
+        val deckTop = ((DemoRunner.GROUND_Y + 14) * scale).toFloat()
+        VideoEncoder(VIDEO_W, VIDEO_H, FPS, out).use { encoder ->
+            for (i in 0 until (SECONDS * FPS).toInt()) {
+                val p = runner.points(i / FPS.toDouble())
+                canvas.drawRect(0f, 0f, VIDEO_W.toFloat(), VIDEO_H.toFloat(), wall)
+                // The belt runs away from the camera: a strip under the runner.
+                canvas.drawRect(VIDEO_W * 0.3f, deckTop, VIDEO_W * 0.7f, VIDEO_H.toFloat(), deck)
+                fun line(a: Int, b: Int, paint: Paint) =
+                    canvas.drawLine((p[a].first * scale).toFloat(), (p[a].second * scale).toFloat(), (p[b].first * scale).toFloat(), (p[b].second * scale).toFloat(), paint)
+                for ((hip, knee, ankle, heel) in listOf(
+                    listOf(Landmark.LEFT_HIP, Landmark.LEFT_KNEE, Landmark.LEFT_ANKLE, Landmark.LEFT_HEEL),
+                    listOf(Landmark.RIGHT_HIP, Landmark.RIGHT_KNEE, Landmark.RIGHT_ANKLE, Landmark.RIGHT_HEEL),
+                )) {
+                    line(hip, knee, limb)
+                    line(knee, ankle, limb)
+                    line(ankle, heel, shoe)
+                }
+                line(Landmark.LEFT_HIP, Landmark.RIGHT_HIP, trunk)
+                line(Landmark.LEFT_SHOULDER, Landmark.RIGHT_SHOULDER, trunk)
+                line(Landmark.LEFT_HIP, Landmark.LEFT_SHOULDER, trunk)
+                line(Landmark.RIGHT_HIP, Landmark.RIGHT_SHOULDER, trunk)
+                line(Landmark.LEFT_SHOULDER, Landmark.LEFT_ELBOW, limb)
+                line(Landmark.LEFT_ELBOW, Landmark.LEFT_WRIST, limb)
+                line(Landmark.RIGHT_SHOULDER, Landmark.RIGHT_ELBOW, limb)
+                line(Landmark.RIGHT_ELBOW, Landmark.RIGHT_WRIST, limb)
+                val head = p[Landmark.NOSE]
+                canvas.drawCircle((head.first * scale).toFloat(), (head.second * scale).toFloat(), 58f * scale, limb)
+                canvas.drawText("Synthetic runner (demo), from behind", 20f, VIDEO_H - 20f, label)
+                encoder.add(bitmap, (i * 1_000_000L / FPS).toLong())
+            }
+            encoder.finish()
+        }
     }
 
     private fun seed(repo: SessionRepository, id: String, createdAt: Long, runner: DemoRunner) {
@@ -215,5 +278,77 @@ private class DemoRunner(val cadence: Double, val landingAheadPx: Double, val le
         const val WIDTH = 1920
         const val HEIGHT = 1080
         const val GROUND_Y = 1000.0
+    }
+}
+
+/**
+ * A runner seen from behind, like the unit tests' SyntheticRearRunner: the right hip drops 9 degrees and the
+ * left knee drifts in 12 degrees while the left leg stands, the feet land close together and the trunk sways.
+ */
+private class DemoRearRunner {
+    private val cadence = 168.0
+    private val stance = 0.35
+
+    fun track(seconds: Double): PoseTrack {
+        val frames = (0 until (seconds * 60).toInt()).map { i ->
+            val p = points(i / 60.0)
+            FramePose(
+                x = FloatArray(Landmark.COUNT) { (p[it].first / DemoRunner.WIDTH).toFloat() },
+                y = FloatArray(Landmark.COUNT) { (p[it].second / DemoRunner.HEIGHT).toFloat() },
+                // The face is hidden from behind, which is how the analyser tells rear from front.
+                visibility = FloatArray(Landmark.COUNT) { if (it == Landmark.NOSE) 0.1f else 1f },
+            )
+        }
+        return PoseTrack(60f, DemoRunner.WIDTH, DemoRunner.HEIGHT, frames)
+    }
+
+    fun points(t: Double): Array<Pair<Double, Double>> {
+        val stride = 2 * 60.0 / cadence
+        val cx = 960.0
+        val cy = DemoRunner.GROUND_Y - 380.0 - 20 * cos(2 * PI * t / (stride / 2))
+        fun phase(offset: Double) = (t / stride + offset) % 1.0
+        fun stanceAt(offset: Double) = phase(offset).let { if (it < stance) it / stance else null }
+        val leftStance = stanceAt(0.0)
+        val rightStance = stanceAt(0.5)
+        val roll = Math.toRadians((leftStance?.let { 9 * sin(PI * it) } ?: 0.0) - (rightStance?.let { 4 * sin(PI * it) } ?: 0.0))
+        val points = Array(Landmark.COUNT) { cx to cy }
+        val leftHip = cx - 45 * cos(roll) to cy - 45 * sin(roll)
+        val rightHip = cx + 45 * cos(roll) to cy + 45 * sin(roll)
+        points[Landmark.LEFT_HIP] = leftHip
+        points[Landmark.RIGHT_HIP] = rightHip
+        val sway = Math.toRadians(4 * sin(2 * PI * t / stride))
+        val sx = cx + 300 * sin(sway)
+        val sy = cy - 300 * cos(sway)
+        points[Landmark.LEFT_SHOULDER] = sx - 110 to sy
+        points[Landmark.RIGHT_SHOULDER] = sx + 110 to sy
+        points[Landmark.NOSE] = sx to sy - 100
+        points[Landmark.LEFT_EAR] = sx - 20 to sy - 105
+        points[Landmark.RIGHT_EAR] = sx + 20 to sy - 105
+        for (left in listOf(true, false)) {
+            val out = if (left) -1.0 else 1.0
+            val hip = if (left) leftHip else rightHip
+            val q = if (left) leftStance else rightStance
+            val swing = (phase(if (left) 0.0 else 0.5) - stance) / (1 - stance)
+            val lift = if (q != null) 0.0 else 150 * sin(PI * swing)
+            val ankle = cx + out * 16 to DemoRunner.GROUND_Y - lift
+            val dx = ankle.first - hip.first
+            val dy = ankle.second - hip.second
+            val half = sqrt(dx * dx + dy * dy) / 2
+            val kneeIn = if (left) 12.0 else 3.0
+            val push = if (q == null) 0.0 else half * kotlin.math.tan(Math.toRadians(kneeIn * sin(PI * q)) / 2)
+            val knee = (hip.first + ankle.first) / 2 - out * push to (hip.second + ankle.second) / 2
+            val base = if (left) Landmark.LEFT_KNEE else Landmark.RIGHT_KNEE
+            points[base] = knee
+            points[base + 2] = ankle
+            points[base + 4] = ankle.first to ankle.second + 10
+            points[base + 6] = ankle.first + out * 6 to ankle.second + 14
+            // Arms swing forwards and back, which from behind is mostly the elbow rising and falling.
+            val sh = points[if (left) Landmark.LEFT_SHOULDER else Landmark.RIGHT_SHOULDER]
+            val armLift = 25 * sin(2 * PI * phase(if (left) 0.5 else 0.0))
+            val elbow = sh.first + out * 25 to sh.second + 125 - armLift
+            points[if (left) Landmark.LEFT_ELBOW else Landmark.RIGHT_ELBOW] = elbow
+            points[if (left) Landmark.LEFT_WRIST else Landmark.RIGHT_WRIST] = elbow.first - out * 15 to elbow.second + 70 - armLift
+        }
+        return points
     }
 }

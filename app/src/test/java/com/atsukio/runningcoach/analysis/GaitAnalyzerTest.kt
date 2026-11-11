@@ -255,8 +255,10 @@ class GaitAnalyzerTest {
     }
 
     @Test
-    fun rejectsFrontView() {
-        assertTrue(analyze(SyntheticRunner(shoulderSpreadPx = 170.0)) is GaitResult.Failure)
+    fun aSquareOnClipIsNotMeasuredAsSideOn() {
+        // Wide shoulders mean a front or rear view, which FrontalAnalyzer measures (see FrontalAnalyzerTest).
+        val result = analyze(SyntheticRunner(shoulderSpreadPx = 170.0))
+        assertTrue(result is GaitResult.Failure || (result as GaitResult.Success).metrics.view != CameraView.SIDE)
     }
 
     @Test

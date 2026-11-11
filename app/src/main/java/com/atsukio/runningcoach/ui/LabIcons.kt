@@ -286,6 +286,89 @@ object LabIcons {
         }
     }
 
+    /** Hip drop, seen from behind: the hip line tilted below level (dashed) over the standing leg. */
+    val HipDrop: ImageVector by lazy {
+        vector("HipDrop") {
+            strokePath(width = 1.3f) {
+                moveTo(3f, 8f); lineTo(6f, 8f)
+                moveTo(9f, 8f); lineTo(12f, 8f)
+                moveTo(15f, 8f); lineTo(18f, 8f)
+            }
+            strokePath(width = 2f) {
+                moveTo(6f, 8f); lineTo(18f, 12.5f)
+                moveTo(6f, 8f); lineTo(6.5f, 21f)
+                moveTo(18f, 12.5f); lineTo(16.5f, 17.5f)
+            }
+            fillPath { circle(6f, 8f, 2f) }
+            fillPath { circle(18f, 12.5f, 2f) }
+            strokePath(width = 1.5f) {
+                moveTo(21.5f, 7f); lineTo(21.5f, 12f)
+                moveTo(20f, 10.5f); lineTo(21.5f, 12f); lineTo(23f, 10.5f)
+            }
+        }
+    }
+
+    /** Knee alignment, seen from behind: the knee sitting inside the straight hip-to-ankle line (dashed). */
+    val KneeAlignment: ImageVector by lazy {
+        vector("KneeAlignment") {
+            strokePath(width = 1.3f) {
+                moveTo(8f, 5.5f); lineTo(8f, 8f)
+                moveTo(8f, 10.5f); lineTo(8f, 13f)
+                moveTo(8f, 15.5f); lineTo(8f, 18f)
+            }
+            strokePath(width = 2f) {
+                moveTo(8f, 3f); lineTo(14f, 12f); lineTo(8f, 21f)
+            }
+            fillPath { circle(8f, 3f, 1.8f) }
+            fillPath { circle(14f, 12f, 2.2f) }
+            fillPath { circle(8f, 21f, 1.8f) }
+            strokePath(width = 1.5f) {
+                moveTo(21.5f, 12f); lineTo(17.5f, 12f)
+                moveTo(19f, 10.5f); lineTo(17.5f, 12f); lineTo(19f, 13.5f)
+            }
+        }
+    }
+
+    /** Step width: two footprints either side of the centre line (dashed), with the gap between them marked. */
+    val StepWidth: ImageVector by lazy {
+        vector("StepWidth") {
+            strokePath(width = 1.3f) {
+                moveTo(12f, 2f); lineTo(12f, 5f)
+                moveTo(12f, 8f); lineTo(12f, 11f)
+                moveTo(12f, 19f); lineTo(12f, 22f)
+            }
+            strokePath(width = 1.8f) {
+                moveTo(5f, 3f); curveTo(8f, 3f, 8f, 11f, 5f, 11f); curveTo(2f, 11f, 2f, 3f, 5f, 3f)
+                moveTo(19f, 9f); curveTo(22f, 9f, 22f, 17f, 19f, 17f); curveTo(16f, 17f, 16f, 9f, 19f, 9f)
+            }
+            strokePath(width = 1.5f) {
+                moveTo(5f, 15f); lineTo(14f, 15f)
+                moveTo(7f, 13.5f); lineTo(5f, 15f); lineTo(7f, 16.5f)
+                moveTo(12f, 13.5f); lineTo(14f, 15f); lineTo(12f, 16.5f)
+            }
+        }
+    }
+
+    /** Trunk sway, seen from behind: the trunk tipped to one side of upright (dashed), with the swing marked. */
+    val TrunkSway: ImageVector by lazy {
+        vector("TrunkSway") {
+            strokePath(width = 1.3f) {
+                moveTo(12f, 3f); lineTo(12f, 6f)
+                moveTo(12f, 9f); lineTo(12f, 12f)
+                moveTo(12f, 15f); lineTo(12f, 18f)
+            }
+            strokePath(width = 2f) {
+                moveTo(12f, 20f); lineTo(16.5f, 8f)
+                moveTo(8f, 20f); lineTo(16f, 20f)
+            }
+            fillPath { circle(17.5f, 5f, 2.3f) }
+            strokePath(width = 1.5f) {
+                moveTo(4f, 8f); curveTo(6f, 5f, 8f, 4.5f, 10f, 5f)
+                moveTo(4f, 5.5f); lineTo(4f, 8f); lineTo(6.5f, 8.2f)
+            }
+        }
+    }
+
     /** The icon for a coaching topic, matching the topic names `Coach` produces. */
     fun forTopic(topic: String): ImageVector = when (topic) {
         "Foot landing", "Overstriding" -> Overstride
@@ -297,6 +380,10 @@ object LabIcons {
         "Arms" -> ArmSwing
         "Left/right balance" -> Symmetry
         "Foot strike" -> FootStrike
+        "Hip drop" -> HipDrop
+        "Knee alignment" -> KneeAlignment
+        "Step width" -> StepWidth
+        "Trunk sway" -> TrunkSway
         else -> Biomechanics
     }
 }

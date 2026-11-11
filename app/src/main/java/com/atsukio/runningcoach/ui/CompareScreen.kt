@@ -114,7 +114,9 @@ fun CompareScreen(id: String, onBack: () -> Unit) {
         val (clip, list) = withContext(Dispatchers.IO) {
             val session = repo.get(id)
             // Newest first, so the default is the most recent other clip that has a video to show.
-            val all = repo.list().filter { it.id != id && it.metrics != null }
+            // Only clips filmed from the same side: a rear clip and a side-on one share almost no measurements.
+            val view = session?.metrics?.view
+            val all = repo.list().filter { it.id != id && it.metrics != null && it.metrics.view == view }
             session?.let { loadClip(repo, it) } to all
         }
         first = clip
@@ -122,7 +124,8 @@ fun CompareScreen(id: String, onBack: () -> Unit) {
         if (otherId == null) otherId = (list.firstOrNull { repo.hasVideo(it.id) && repo.hasPose(it.id) } ?: list.firstOrNull())?.id
         loaded = true
     }
-    LaunchedEffect(otherId) {
+    // Keyed on the list too: after a rotation the saved choice is restored before the list has loaded.
+    LaunchedEffect(otherId, others) {
         val session = others.firstOrNull { it.id == otherId }
         second = null
         if (session != null) second = withContext(Dispatchers.IO) { loadClip(repo, session) }

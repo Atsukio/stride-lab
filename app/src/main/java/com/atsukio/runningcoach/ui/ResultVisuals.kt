@@ -58,6 +58,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.scale
+import com.atsukio.runningcoach.analysis.CameraView
 import com.atsukio.runningcoach.analysis.FootStrikeType
 import com.atsukio.runningcoach.analysis.GaitMetrics
 import com.atsukio.runningcoach.analysis.LandingAnnotation
@@ -289,6 +290,8 @@ fun LandingCard(
 
 /** The annotation for landing [frame], with distances in cm when the leg length is known. */
 internal fun landingAnnotation(track: PoseTrack, metrics: GaitMetrics, frame: Int): LandingAnnotation? {
+    // These are side-on measurements; on a front or rear clip they would be drawn on the wrong things.
+    if (metrics.view != CameraView.SIDE) return null
     val legCm = metrics.overstrideCm?.let { cm -> metrics.overstrideLegRatio?.takeIf { abs(it) > 1e-6 }?.let { cm / it } }
     val time = metrics.contactFrames.indexOf(frame).takeIf { it >= 0 }?.let { metrics.contactTimes.getOrNull(it) } ?: frame.toDouble()
     return LandingAnnotation.at(track, frame, legCm, time)
@@ -302,7 +305,7 @@ private fun describe(a: LandingAnnotation) = listOfNotNull(
 ).joinToString(", ")
 
 @Composable
-private fun Legend(color: Color, text: String) {
+internal fun Legend(color: Color, text: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(10.dp).clip(CircleShape).background(color))
         Spacer(Modifier.width(8.dp))
@@ -446,7 +449,7 @@ internal fun DrawScope.drawLanding(
     }
 }
 
-private fun videoFrame(video: File, seconds: Double, aspectRatio: Float): ImageBitmap? =
+internal fun videoFrame(video: File, seconds: Double, aspectRatio: Float): ImageBitmap? =
     videoFrameBitmap(video, seconds, aspectRatio)?.asImageBitmap()
 
 /** The video frame at [seconds], upright and at most [maxSide] px on its long side. */

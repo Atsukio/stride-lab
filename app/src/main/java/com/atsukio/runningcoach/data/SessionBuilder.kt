@@ -56,9 +56,10 @@ internal object SessionBuilder {
     /**
      * Raised whenever a change to the measuring code moves the figures, so older clips can be measured again
      * and trends compare like with like. 1: landings measured between frames. 2: the landing foot is the front
-     * one, and left/right balance compares medians. 3: foot strike ratio and classification.
+     * one, and left/right balance compares medians. 3: foot strike ratio and classification. 4: front and rear
+     * clips are measured instead of refused (side-on figures didn't move).
      */
-    const val MEASURE_VERSION = 3
+    const val MEASURE_VERSION = 4
 
     /** The speed and height a person may type for one clip: a speed of 3 to 30 km/h (or none) and a height of 120 to 220 cm. */
     fun validSpeed(kmh: Double?): Boolean = kmh == null || kmh in 3.0..30.0
@@ -72,6 +73,17 @@ internal object SessionBuilder {
  */
 internal fun SessionRepository.recalculate(id: String, speedKmh: Double?, heightCm: Double): Session? =
     remeasure(id, speedKmh, heightCm, byHand = true)
+
+/**
+ * Brings one clip up to the current measuring code when it is opened, keeping its own speed and height and
+ * without marking it as changed by hand. Returns the clip as it now stands.
+ */
+internal fun SessionRepository.remeasureIfOutdated(session: Session): Session =
+    if (session.measureVersion < SessionBuilder.MEASURE_VERSION && hasPose(session.id)) {
+        remeasure(session.id, session.speedKmh, session.runnerHeightCm, byHand = false) ?: session
+    } else {
+        session
+    }
 
 /** Clips whose figures came from an older version of the measuring code and can be measured again. */
 internal fun SessionRepository.outdatedClips(): List<Session> =

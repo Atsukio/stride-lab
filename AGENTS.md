@@ -1,6 +1,6 @@
 # Stride Lab: notes for coding agents
 
-Stride Lab is an Android app that films a runner side-on on a treadmill, detects their pose with MediaPipe,
+Stride Lab is an Android app that films a runner on a treadmill (side-on, or square on from behind or in front), detects their pose with MediaPipe,
 measures their running form and gives coaching suggestions. Read [README.md](README.md) for what the app does.
 This file covers how to work on it.
 
@@ -79,8 +79,9 @@ machine points at JDK 17. App code targets Java 17. compileSdk and targetSdk are
 app/src/main/java/com/atsukio/runningcoach/
   analysis/  Pure Kotlin, no Android imports. PoseTrack, PoseCleaner (leg swaps, jumps, smoothing), LiveStrikeDetector
              (the landing pulse on the camera preview),
-             GaitAnalyzer (landings, metrics), Coach (rules -> Feedback, mainFocus), Framing, RunInsights,
-             LandingAnnotation
+             GaitAnalyzer (side-on landings and metrics; hands square-on clips to FrontalAnalyzer: hip drop, knee
+             alignment, step width, trunk sway), Coach (rules -> Feedback, mainFocus), Framing, RunInsights,
+             LandingAnnotation (side), StanceAnnotation (front/rear)
   pose/      MediaPipe extraction: PoseExtractor (decoder + two-pass), LivePoseAnalyzer (analyse while
              recording), LiveAlignment (matches live frames to the saved video), GpuCheck, FrameTiming, Yuv
   data/      Session (kotlinx.serialization), SessionRepository (app-private files), CoachSettings, RunRecorder,
@@ -88,7 +89,9 @@ app/src/main/java/com/atsukio/runningcoach/
   sensors/   Bluetooth heart-rate and running speed/cadence sensors (GATT parsers, SensorHub)
   audio/     Metronome, SpokenCues (offline text-to-speech) and CueSchedule
   share/     ShareSummary (text), ShareCard (image drawn off-screen), ResultSharer (FileProvider + share sheet)
-  ui/        Compose Material 3 screens. CoachApp holds navigation; ResultVisuals holds the shared drawing helpers
+  ui/        Compose Material 3 screens. CoachApp holds navigation; ResultVisuals holds the shared drawing helpers.
+             The results screen is three files: ResultScreen (loading, share dialog, list), ResultCards (summary,
+             foot strike, scale, feedback cards), VideoReplay (player, skeleton overlay); StanceCard is the rear view's card
 ```
 
 ## Gotchas already hit
@@ -126,6 +129,28 @@ app/src/main/java/com/atsukio/runningcoach/
   folder: moving `ic_launcher.xml` to `mipmap-anydpi` fails the build with "resource mipmap/ic_launcher not found".
   Leave it, and don't count it as a new warning.
 
+- **Views.** `GaitMetrics.view` is SIDE, REAR or FRONT; front/rear clips have `frontal` set and the side-on fields
+  null. Anything that compares clips (previous clip, milestones, ghost, compare picker) must stay within one view.
+  `landingAnnotation` returns null off the side view. Sideways figures are measured against the runner's own hips,
+  so front and rear share one code path and a wrong view guess only swaps the left/right names.
+- Opening a clip re-measures it through `remeasureIfOutdated` (not `recalculate`, which marks it edited by hand).
+- Session files are written to a `.tmp` and renamed (`SessionRepository.writeSafely`); keep new writers on it.
+- "Analyse again" must call `AnalysisRunner.forgetFinished` first, or a finished task left in the runner returns at once.
+- The emulator's `settings.xml` (guide seen) doesn't survive a cold boot with `-no-snapshot-save`; write it again.
+
+## Keeping sessions small
+
+Context is the main cost of a session on this repo. To keep it down:
+
+- Search first (`grep -n`), then read only the lines you need. Don't read `CaptureScreen.kt`, `CompareScreen.kt`,
+  `GaitAnalyzer.kt` or `HomeScreen.kt` whole (25–33 KB each); keep new UI in its own file rather than growing them.
+- Run Gradle with `-q` and pipe through `grep -E "^e:|^w:|FAIL"`. For lint, grep the report for the count and the
+  files you touched; never print it.
+- Emulator checks: tile several screenshots into one scaled contact sheet with ffmpeg and read that one image.
+- Write multi-line edits as a script file (Write tool) and run it; a failed heredoc costs a retry.
+- A sub-agent review of the whole app costs about as much as the rest of a long session. Use one only when asked
+  for a broad review, and give it a narrow list of files.
+
 ## Design system
 
 The look is a dark-first "lab" style: near-black green background, mint accent, flat outlined panels, monospace
@@ -162,10 +187,17 @@ figures. It lives in `ui/Theme.kt` (colours, typography, shapes, `Appearance` se
 ### Idea backlog (not started)
 
 Done so far: share image, storage controls, crash log, dark lab redesign, steady-part trimming, milestones, last-time
-ghost, focus plan, spoken cues, background analysis, instrumented tests, video overlay MP4 export, PDF report, side-by-side clip comparison, foot strike ratio tracking and trends, audio cue controls, synchronized strike scrubbing, interactive foot strike target overlay, intuitive lab icons.
+ghost, focus plan, spoken cues, background analysis, instrumented tests, video overlay MP4 export, PDF report, side-by-side clip comparison, foot strike ratio tracking and trends, audio cue controls, synchronized strike scrubbing, interactive foot strike target overlay, intuitive lab icons,
+front and rear view analysis (experimental), README badges and demo GIF.
 
-- Front and rear view analysis (knee collapse, hip drop, crossover). `GaitAnalyzer` rejects those views today; this
-  needs different landmarks and metrics, a camera-placement guide, and real footage to check against before it can be trusted.
+- **Check the front and rear figures on a real clip** (Pixel): view detection (shoulder order, with the face's
+  visibility as cross-check), landings from a rear heel track, and whether the thresholds in `Coach` feel right.
+  Until then they stay labelled as a guide. The synthetic rear runner can't show detector problems.
+- From the optimisation review, not yet done: run `GpuCheck.ensureChecked` off the main thread (needs the Pixel:
+  GPU delegates can be tied to a thread); stop `VideoReplay`/`CompareScreen` recomposing every frame (read the
+  position inside the Canvas draw lambda); skip `toBitmap()` in `LivePoseAnalyzer` for frames nobody will use;
+  move `StorageScreen` file reads off the main thread; a cached, process-wide `SessionRepository`; make
+  `AnalysisRunner.cancel` join the job before deleting; restart on CPU if the GPU fails mid-clip.
 - Pose detection fallback for phones with no ARM libraries (today clips can't be analysed on them).
 - Light-theme pass: screenshots of every screen in light mode.
 - A Play Store release pass using the `android-play-release` skill (version bump, notes, screenshots).

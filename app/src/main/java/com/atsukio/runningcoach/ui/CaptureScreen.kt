@@ -403,7 +403,7 @@ fun CaptureScreen(
                     CapturePhase.Idle -> {
                         val advice = livePreview?.let { Framing.check(it.pose, it.brightness) }
                         OverlayLabel(
-                            advice?.message ?: "Side-on · whole body · hip height",
+                            advice?.message ?: "Side-on or from behind · whole body · hip height",
                             dot = when (advice?.good) {
                                 true -> Signal.Good
                                 false -> Signal.Improve

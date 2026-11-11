@@ -8,7 +8,8 @@
 ![MediaPipe](https://img.shields.io/badge/pose-MediaPipe-0097A7)
 [![Network: none](https://img.shields.io/badge/network-none%20(on--device%20only)-2ea44f)](PRIVACY.md)
 
-An Android app that watches a runner on a treadmill, measures their running form, and suggests improvements.
+An Android app that watches a runner on a treadmill, from the side or from behind, measures their running form,
+and suggests improvements.
 Everything runs on the phone: there is no internet permission, no cloud service, and no backup of videos.
 
 <!-- markdownlint-disable-next-line MD033 -->
@@ -44,6 +45,23 @@ Everything runs on the phone: there is no internet permission, no cloud service,
 6. **See what the numbers mean.** Each measurement has a bar showing it against its good range, and an
    **At landing** card shows every foot landing with the overstride, shin angle, knee bend and lean drawn on it.
    **Analyse again** reruns a clip with the current version and settings.
+
+## From behind or in front
+
+A clip filmed square on, from straight behind the treadmill (or in front, if the console doesn't hide the legs), is
+recognised automatically and measured differently (`analysis/FrontalAnalyzer.kt`):
+
+- **Hip drop:** how far the lifted leg's hip dips below the standing leg's, for each leg.
+- **Knee alignment:** how far the standing knee drifts inside the line from hip to ankle, for each leg.
+- **Step width:** the sideways gap between one landing and the next; negative when the feet cross over.
+- **Trunk sway:** how far the upper body rocks to each side.
+- Cadence and bounce, as from the side.
+
+An **On one leg** card shows a still from the middle of each step with the hip line and standing leg drawn on.
+Side-on and rear clips are kept apart in comparisons, milestones and "Last time", and chart separately in Progress.
+Distances come from your height here, because the belt moves away from the camera and can't give a scale.
+**These figures are new and have only been checked against a synthetic runner, not real footage or a motion lab**,
+so the app marks them as a guide.
 
 ## Recording and practice
 
@@ -96,12 +114,15 @@ Keep the app open with the screen on during a whole run; it doesn't record in th
 ## Filming tips
 
 - Treadmill, with the phone side-on at hip height, about 2–3 m away.
+- For a rear clip: the same height and distance, straight behind and in line with the belt, phone level.
 - Whole body, head to feet, in frame for the whole clip.
 - 10–15 seconds of steady running.
 
 ## Limitations (v0.1)
 
-- Side-on footage only. Front and rear views (knee collapse, hip drop, crossover) aren't analysed yet.
+- Front and rear figures are experimental. A camera off to one side makes them read low, and a phone that isn't
+  level shows up as one hip dropping more than the other.
+- A clip filmed at an angle between side-on and square on isn't measured well either way.
 - Heel versus forefoot strike can't be judged reliably from pose landmarks.
 - Comments are coaching suggestions, not medical advice.
 
